@@ -1,0 +1,5 @@
+env/
+Amazon API Key.rtf
+data/dashboard-data.json
+*.log
+.DS_Store

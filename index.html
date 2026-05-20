@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Amazon Non-Bookable Space Usage</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Amazon pilot spaces</p>
+        <h1>Non-bookable usage dashboard</h1>
+      </div>
+      <div class="source-note" id="source-note">Loading data...</div>
+    </header>
+
+    <main>
+      <section class="filters" aria-label="Filters">
+        <label>
+          Building
+          <select id="building-filter"></select>
+        </label>
+        <label>
+          Floor
+          <select id="floor-filter"></select>
+        </label>
+        <label>
+          Space type
+          <select id="type-filter"></select>
+        </label>
+        <label>
+          Start date
+          <input id="start-date-filter" type="date" />
+        </label>
+        <label>
+          End date
+          <input id="end-date-filter" type="date" />
+        </label>
+        <label>
+          Hours
+          <span class="range-pair">
+            <select id="start-hour-filter"></select>
+            <select id="end-hour-filter"></select>
+          </span>
+        </label>
+        <fieldset class="day-filter">
+          <legend>Days</legend>
+          <button type="button" data-day="1">Mon</button>
+          <button type="button" data-day="2">Tue</button>
+          <button type="button" data-day="3">Wed</button>
+          <button type="button" data-day="4">Thu</button>
+          <button type="button" data-day="5">Fri</button>
+        </fieldset>
+      </section>
+
+      <section class="insight" aria-label="Selected space type insight">
+        <div>
+          <p class="eyebrow" id="insight-scope">Selected space type</p>
+          <h2 id="insight-title">Loading usage pattern...</h2>
+          <p id="insight-copy"></p>
+          <div id="space-grid" class="space-grid"></div>
+        </div>
+        <div class="insight-kpis">
+          <article>
+            <span>Peak demand</span>
+            <strong id="kpi-peak-demand">-</strong>
+            <small id="kpi-peak-demand-sub"></small>
+          </article>
+          <article>
+            <span>Typical active</span>
+            <strong id="kpi-typical-active">-</strong>
+            <small>average spaces active per hour</small>
+          </article>
+          <article>
+            <span>Used &gt; 1h/day</span>
+            <strong id="kpi-active-spaces">-</strong>
+            <small>spaces with meaningful daily use</small>
+          </article>
+        </div>
+      </section>
+
+      <section class="kpis" aria-label="Key metrics">
+          <article>
+            <span>Avg hrs / space / day</span>
+            <strong id="kpi-utilization">-</strong>
+          </article>
+          <article>
+            <span>Median hrs / space / day</span>
+            <strong id="kpi-used">-</strong>
+          </article>
+          <article>
+            <span>Shortage-risk hours</span>
+            <strong id="kpi-spaces">-</strong>
+          </article>
+          <article>
+            <span>Spaces &gt; 1h/day</span>
+            <strong id="kpi-peak">-</strong>
+          </article>
+      </section>
+
+      <section class="grid two">
+        <div class="panel">
+          <div class="panel-heading">
+            <h2>Space type comparison</h2>
+            <span>Select a type to inspect it, not blend it</span>
+          </div>
+          <div id="type-bars" class="bars"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-heading">
+            <h2>Selected type by day and hour</h2>
+            <span>Average active share, local time</span>
+          </div>
+          <div id="heatmap" class="heatmap"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Hourly shape by weekday</h2>
+          <span>Selected type active share through the day</span>
+        </div>
+        <div id="weekday-lines" class="weekday-lines"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Daily usage</h2>
+          <span>Selected type date and day-of-week view</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Day</th>
+                <th>Building</th>
+                <th>Floor</th>
+                <th>Type</th>
+                <th>Active spaces</th>
+                <th>Avg hrs / space</th>
+                <th>Peak active</th>
+                <th>Shortage hours</th>
+              </tr>
+            </thead>
+            <tbody id="daily-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Weekly utilization by floor and type</h2>
+          <span>Selected type, grouped by week and floor</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Week</th>
+                <th>Building</th>
+                <th>Floor</th>
+                <th>Type</th>
+                <th>Avg hrs / space / day</th>
+                <th>Median space hrs / day</th>
+                <th>Peak active</th>
+                <th>Shortage hours</th>
+              </tr>
+            </thead>
+            <tbody id="weekly-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Spaces</h2>
+          <span>Sortable individual spaces; click a row for daily/hourly detail</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-sort="spaceName">Space</th>
+                <th>Floor</th>
+                <th>Function</th>
+                <th data-sort="avgHoursPerDay">Avg hrs/day</th>
+                <th data-sort="medianHoursPerDay">Median hrs/day</th>
+                <th data-sort="usedHours">Total hours</th>
+                <th data-sort="daysUsed">Days used</th>
+                <th data-sort="day-1">Mon</th>
+                <th data-sort="day-2">Tue</th>
+                <th data-sort="day-3">Wed</th>
+                <th data-sort="day-4">Thu</th>
+                <th data-sort="day-5">Fri</th>
+                <th>Most used</th>
+                <th>Busiest hour</th>
+                <th>Least used</th>
+              </tr>
+            </thead>
+            <tbody id="space-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel caveat">
+        <h2>Coverage and data audit</h2>
+        <ul id="coverage-notes"></ul>
+      </section>
+    </main>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
