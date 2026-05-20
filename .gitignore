@@ -1,5 +1,6 @@
 env/
 Amazon API Key.rtf
 data/dashboard-data.json
+data/benchmark-context.json
 *.log
 .DS_Store

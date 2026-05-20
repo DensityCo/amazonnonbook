@@ -16,16 +16,21 @@
     </header>
 
     <main>
+      <nav class="tabs" aria-label="Dashboard views">
+        <button type="button" class="active" data-tab="detail">Space Type Detail</button>
+        <button type="button" data-tab="comparison">Space Type Comparison</button>
+      </nav>
+
       <section class="filters" aria-label="Filters">
-        <label>
-          Building
-          <select id="building-filter"></select>
-        </label>
-        <label>
-          Floor
-          <select id="floor-filter"></select>
-        </label>
-        <label>
+        <div class="filter-group wide">
+          <span class="filter-label">Buildings</span>
+          <div id="building-filter" class="pill-group"></div>
+        </div>
+        <div class="filter-group wide">
+          <span class="filter-label">Floors</span>
+          <div id="floor-filter" class="pill-group"></div>
+        </div>
+        <label id="type-filter-wrap">
           Space type
           <select id="type-filter"></select>
         </label>
@@ -54,6 +59,7 @@
         </fieldset>
       </section>
 
+      <section id="detail-view">
       <section class="insight" aria-label="Selected space type insight">
         <div>
           <p class="eyebrow" id="insight-scope">Selected space type</p>
@@ -99,14 +105,7 @@
           </article>
       </section>
 
-      <section class="grid two">
-        <div class="panel">
-          <div class="panel-heading">
-            <h2>Space type comparison</h2>
-            <span>Select a type to inspect it, not blend it</span>
-          </div>
-          <div id="type-bars" class="bars"></div>
-        </div>
+      <section class="grid one">
         <div class="panel">
           <div class="panel-heading">
             <h2>Selected type by day and hour</h2>
@@ -202,6 +201,76 @@
             <tbody id="space-table"></tbody>
           </table>
         </div>
+      </section>
+      </section>
+
+      <section id="comparison-view" hidden>
+        <section class="panel benchmark-panel" id="benchmark-panel" hidden>
+          <div class="panel-heading">
+            <h2>Benchmark context</h2>
+            <span>Optional context from benchmarking CLI output</span>
+          </div>
+          <div id="benchmark-content" class="benchmark-content"></div>
+        </section>
+
+        <section class="grid two">
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Usage by space type</h2>
+              <span>Avg hours per space per selected day</span>
+            </div>
+            <div id="comparison-usage-bars" class="bars"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Shortage risk by type</h2>
+              <span>Hours at or above 80% active</span>
+            </div>
+            <div id="comparison-shortage-bars" class="bars"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Type by hour</h2>
+            <span>Average active share by selected hour window</span>
+          </div>
+          <div id="comparison-type-hour" class="type-hour-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Building breakdown</h2>
+            <span>Compare selected buildings within each space type</span>
+          </div>
+          <div id="comparison-building-breakdown" class="building-breakdown"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Space type comparison table</h2>
+            <span>Normalized metrics across selected buildings and floors</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Space type</th>
+                  <th>Spaces</th>
+                  <th>Avg hrs / space / day</th>
+                  <th>Median hrs / space / day</th>
+                  <th>Peak active</th>
+                  <th>Peak active %</th>
+                  <th>Shortage hours</th>
+                  <th>Spaces &gt; 1h/day</th>
+                  <th>Underused spaces</th>
+                  <th>Busiest weekday/hour</th>
+                </tr>
+              </thead>
+              <tbody id="comparison-table"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       <section class="panel caveat">

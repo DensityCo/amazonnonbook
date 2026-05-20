@@ -1,12 +1,14 @@
 const state = {
   data: null,
+  benchmark: null,
   rows: [],
+  activeTab: "detail",
   selectedSpaceId: null,
   sortKey: "avgHoursPerDay",
   sortAsc: false,
   filters: {
-    buildingId: "all",
-    floorId: "all",
+    buildingIds: new Set(["all"]),
+    floorIds: new Set(["all"]),
     type: "",
     startDate: "",
     endDate: "",
@@ -18,8 +20,12 @@ const state = {
 
 const els = {
   sourceNote: document.querySelector("#source-note"),
+  tabs: [...document.querySelectorAll(".tabs button")],
+  detailView: document.querySelector("#detail-view"),
+  comparisonView: document.querySelector("#comparison-view"),
   buildingFilter: document.querySelector("#building-filter"),
   floorFilter: document.querySelector("#floor-filter"),
+  typeFilterWrap: document.querySelector("#type-filter-wrap"),
   typeFilter: document.querySelector("#type-filter"),
   startDateFilter: document.querySelector("#start-date-filter"),
   endDateFilter: document.querySelector("#end-date-filter"),
@@ -38,12 +44,18 @@ const els = {
   kpiUsed: document.querySelector("#kpi-used"),
   kpiSpaces: document.querySelector("#kpi-spaces"),
   kpiPeak: document.querySelector("#kpi-peak"),
-  typeBars: document.querySelector("#type-bars"),
   heatmap: document.querySelector("#heatmap"),
   weekdayLines: document.querySelector("#weekday-lines"),
   weeklyTable: document.querySelector("#weekly-table"),
   dailyTable: document.querySelector("#daily-table"),
   spaceTable: document.querySelector("#space-table"),
+  benchmarkPanel: document.querySelector("#benchmark-panel"),
+  benchmarkContent: document.querySelector("#benchmark-content"),
+  comparisonUsageBars: document.querySelector("#comparison-usage-bars"),
+  comparisonShortageBars: document.querySelector("#comparison-shortage-bars"),
+  comparisonTypeHour: document.querySelector("#comparison-type-hour"),
+  comparisonBuildingBreakdown: document.querySelector("#comparison-building-breakdown"),
+  comparisonTable: document.querySelector("#comparison-table"),
   coverageNotes: document.querySelector("#coverage-notes")
 };
 
@@ -52,10 +64,15 @@ const businessDays = [1, 2, 3, 4, 5];
 const colors = ["#3367c2", "#2bb8a8", "#d5965f", "#8c5be8", "#159fd3", "#b4453f"];
 const shortageThreshold = 0.8;
 
-fetch("data/dashboard-data.json")
-  .then((response) => response.json())
-  .then((data) => {
+Promise.all([
+  fetch("data/dashboard-data.json").then((response) => response.json()),
+  fetch("data/benchmark-context.json")
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null)
+])
+  .then(([data, benchmark]) => {
     state.data = data;
+    state.benchmark = benchmark;
     state.rows = (data.metrics.intervals || []).map((row) => ({
       ...row,
       day: dayIndex(row.date),
@@ -82,15 +99,6 @@ function setupFilters() {
   state.filters.endDate = metadata.includedRange.end;
 
   setOptions(
-    els.buildingFilter,
-    [{ value: "all", label: "All buildings" }].concat(
-      dimensions.buildings.map((building) => ({
-        value: building.buildingId,
-        label: building.buildingName
-      }))
-    )
-  );
-  setOptions(
     els.typeFilter,
     rankedTypes.map(({ type, spaces }) => ({
       value: type,
@@ -110,21 +118,18 @@ function setupFilters() {
   );
   els.startHourFilter.value = state.filters.startHour;
   els.endHourFilter.value = state.filters.endHour;
-  refreshFloorOptions();
+
+  renderBuildingPills();
+  renderFloorPills();
   refreshDayButtons();
 
-  els.buildingFilter.addEventListener("change", () => {
-    state.filters.buildingId = els.buildingFilter.value;
-    state.filters.floorId = "all";
-    state.selectedSpaceId = null;
-    refreshFloorOptions();
-    render();
-  });
-  els.floorFilter.addEventListener("change", () => {
-    state.filters.floorId = els.floorFilter.value;
-    state.selectedSpaceId = null;
-    render();
-  });
+  for (const tab of els.tabs) {
+    tab.addEventListener("click", () => {
+      state.activeTab = tab.dataset.tab;
+      state.selectedSpaceId = null;
+      render();
+    });
+  }
   els.typeFilter.addEventListener("change", () => {
     state.filters.type = els.typeFilter.value;
     state.selectedSpaceId = null;
@@ -179,19 +184,134 @@ function setupFilters() {
   }
 }
 
-function refreshFloorOptions() {
-  const floors = state.data.dimensions.floors.filter(
-    (floor) =>
-      state.filters.buildingId === "all" ||
-      floor.buildingId === state.filters.buildingId
+function render() {
+  els.detailView.hidden = state.activeTab !== "detail";
+  els.comparisonView.hidden = state.activeTab !== "comparison";
+  els.typeFilterWrap.hidden = state.activeTab !== "detail";
+  for (const tab of els.tabs) tab.classList.toggle("active", tab.dataset.tab === state.activeTab);
+
+  els.sourceNote.textContent = sourceText();
+  renderBuildingPills();
+  renderFloorPills();
+  renderCoverageNotes();
+
+  if (state.activeTab === "detail") renderDetail();
+  else renderComparison();
+}
+
+function renderDetail() {
+  const rows = filteredIntervals();
+  const spaces = filteredSpaces();
+  const spaceMetrics = computeSpaceMetrics(rows, spaces);
+  const peak = peakSnapshot(rows);
+  const activeMeaningful = spaceMetrics.filter((space) => space.avgHoursPerDay > 1).length;
+  const typicalActive = averageActiveSpaces(rows);
+  const usage = selectedUsageSummary(rows, spaces, spaceMetrics);
+
+  els.kpiUtilization.textContent = `${number(usage.avgHoursPerSpacePerDay)}h`;
+  els.kpiUsed.textContent = `${number(usage.medianHoursPerSpacePerDay)}h`;
+  els.kpiSpaces.textContent = `${number(usage.shortageHours, 0)}h`;
+  els.kpiPeak.textContent = `${activeMeaningful}/${spaces.length}`;
+  els.kpiPeakDemand.textContent = `${peak.active}/${spaces.length}`;
+  els.kpiPeakDemandSub.textContent = peak.active ? `${peak.dayLabel} ${peak.date} ${formatHour(peak.hour)}` : "No usage";
+  els.kpiTypicalActive.textContent = number(typicalActive, 1);
+  els.kpiActiveSpaces.textContent = `${activeMeaningful}/${spaces.length}`;
+
+  renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage);
+  renderHeatmap(rows, spaces.length);
+  renderWeekdayLines(rows, spaces.length);
+  renderDailyTable(rows);
+  renderWeeklyTable(rows);
+  renderSpaceTable(spaceMetrics);
+}
+
+function renderComparison() {
+  const metrics = state.data.dimensions.types
+    .map((type) => {
+      const rows = filteredIntervals(type);
+      const spaces = filteredSpaces(type);
+      const spaceMetrics = computeSpaceMetrics(rows, spaces);
+      const usage = selectedUsageSummary(rows, spaces, spaceMetrics);
+      const peak = peakSnapshot(rows);
+      const activeMeaningful = spaceMetrics.filter((space) => space.avgHoursPerDay > 1).length;
+      const underused = spaceMetrics.filter((space) => space.avgHoursPerDay < 0.25).length;
+      return {
+        type,
+        spaces: spaces.length,
+        peakActive: peak.active,
+        peakShare: spaces.length ? peak.active / spaces.length : 0,
+        activeMeaningful,
+        underused,
+        busiest: mostUsedHourLabel(rows),
+        spaceMetrics,
+        rows,
+        ...usage
+      };
+    })
+    .filter((metric) => metric.spaces > 0)
+    .sort((a, b) => b.avgHoursPerSpacePerDay - a.avgHoursPerSpacePerDay);
+
+  renderBenchmarkContext(metrics);
+  renderComparisonBars(els.comparisonUsageBars, metrics, "avgHoursPerSpacePerDay", "h/space/day", false);
+  renderComparisonBars(els.comparisonShortageBars, metrics, "shortageHours", "shortage hrs", true);
+  renderTypeHourGrid(metrics);
+  renderBuildingBreakdown();
+  renderComparisonTable(metrics);
+}
+
+function renderBuildingPills() {
+  const buildings = state.data.dimensions.buildings.slice().sort((a, b) => a.buildingName.localeCompare(b.buildingName));
+  const options = [{ id: "all", label: "All" }].concat(
+    buildings.map((building) => ({ id: building.buildingId, label: shortBuildingName(building.buildingName) }))
   );
-  setOptions(
-    els.floorFilter,
-    [{ value: "all", label: "All floors" }].concat(
-      floors.map((floor) => ({ value: floor.floorId, label: floor.floorName }))
-    )
+  renderPills(els.buildingFilter, options, state.filters.buildingIds, (id) => {
+    toggleSetFilter(state.filters.buildingIds, id);
+    state.filters.floorIds = new Set(["all"]);
+    state.selectedSpaceId = null;
+    render();
+  });
+}
+
+function renderFloorPills() {
+  const floors = state.data.dimensions.floors
+    .filter((floor) => setMatches(state.filters.buildingIds, floor.buildingId))
+    .sort((a, b) => a.buildingName.localeCompare(b.buildingName) || a.floorName.localeCompare(b.floorName));
+  const options = [{ id: "all", label: "All" }].concat(
+    floors.map((floor) => ({ id: floor.floorId, label: `${shortBuildingName(floor.buildingName)} ${floor.floorName.replace(/^Floor\s*/i, "")}` }))
   );
-  els.floorFilter.value = state.filters.floorId;
+  const allowed = new Set(options.map((option) => option.id));
+  state.filters.floorIds = new Set([...state.filters.floorIds].filter((id) => allowed.has(id)));
+  if (!state.filters.floorIds.size) state.filters.floorIds.add("all");
+  renderPills(els.floorFilter, options, state.filters.floorIds, (id) => {
+    toggleSetFilter(state.filters.floorIds, id);
+    state.selectedSpaceId = null;
+    render();
+  });
+}
+
+function renderPills(container, options, selectedSet, onClick) {
+  container.replaceChildren(
+    ...options.map((option) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = selectedSet.has(option.id) ? "active" : "";
+      button.textContent = option.label;
+      button.addEventListener("click", () => onClick(option.id));
+      return button;
+    })
+  );
+}
+
+function toggleSetFilter(set, id) {
+  if (id === "all") {
+    set.clear();
+    set.add("all");
+    return;
+  }
+  set.delete("all");
+  if (set.has(id)) set.delete(id);
+  else set.add(id);
+  if (!set.size) set.add("all");
 }
 
 function refreshDayButtons() {
@@ -209,36 +329,6 @@ function setOptions(select, options) {
       return node;
     })
   );
-}
-
-function render() {
-  const rows = filteredIntervals();
-  const spaces = filteredSpaces();
-  const spaceMetrics = computeSpaceMetrics(rows, spaces);
-  const total = combine(rows);
-  const peak = peakSnapshot(rows);
-  const activeMeaningful = spaceMetrics.filter((space) => space.avgHoursPerDay > 1).length;
-  const typicalActive = averageActiveSpaces(rows);
-  const usage = selectedUsageSummary(rows, spaces, spaceMetrics);
-
-  els.sourceNote.textContent = sourceText();
-  els.kpiUtilization.textContent = `${number(usage.avgHoursPerSpacePerDay)}h`;
-  els.kpiUsed.textContent = `${number(usage.medianHoursPerSpacePerDay)}h`;
-  els.kpiSpaces.textContent = `${number(usage.shortageHours, 0)}h`;
-  els.kpiPeak.textContent = `${activeMeaningful}/${spaces.length}`;
-  els.kpiPeakDemand.textContent = `${peak.active}/${spaces.length}`;
-  els.kpiPeakDemandSub.textContent = peak.active ? `${peak.dayLabel} ${peak.date} ${formatHour(peak.hour)}` : "No usage";
-  els.kpiTypicalActive.textContent = number(typicalActive, 1);
-  els.kpiActiveSpaces.textContent = `${activeMeaningful}/${spaces.length}`;
-
-  renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage);
-  renderTypeBars();
-  renderHeatmap(rows, spaces.length);
-  renderWeekdayLines(rows, spaces.length);
-  renderDailyTable(rows);
-  renderWeeklyTable(rows);
-  renderSpaceTable(spaceMetrics);
-  renderCoverageNotes();
 }
 
 function sourceText() {
@@ -261,8 +351,8 @@ function filteredIntervals(typeOverride = state.filters.type) {
       state.filters.days.has(row.day) &&
       row.hour >= state.filters.startHour &&
       row.hour < state.filters.endHour &&
-      (state.filters.buildingId === "all" || row.buildingId === state.filters.buildingId) &&
-      (state.filters.floorId === "all" || row.floorId === state.filters.floorId)
+      setMatches(state.filters.buildingIds, row.buildingId) &&
+      setMatches(state.filters.floorIds, row.floorId)
   );
 }
 
@@ -270,9 +360,13 @@ function filteredSpaces(typeOverride = state.filters.type) {
   return state.data.dimensions.spaces.filter(
     (space) =>
       space.type === typeOverride &&
-      (state.filters.buildingId === "all" || space.buildingId === state.filters.buildingId) &&
-      (state.filters.floorId === "all" || space.floorId === state.filters.floorId)
+      setMatches(state.filters.buildingIds, space.buildingId) &&
+      setMatches(state.filters.floorIds, space.floorId)
   );
+}
+
+function setMatches(set, id) {
+  return set.has("all") || set.has(id);
 }
 
 function combine(rows) {
@@ -328,8 +422,8 @@ function computeSpaceMetrics(rows, spaces, datesOverride = selectedDates()) {
 function renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage) {
   const type = state.filters.type;
   const scope = [
-    state.filters.buildingId === "all" ? "All buildings" : buildingName(state.filters.buildingId),
-    state.filters.floorId === "all" ? "All floors" : floorName(state.filters.floorId),
+    selectedBuildingLabel(),
+    selectedFloorLabel(),
     `${state.filters.startDate} to ${state.filters.endDate}`,
     `${formatHour(state.filters.startHour)}-${formatHour(state.filters.endHour)}`
   ];
@@ -340,53 +434,19 @@ function renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage) {
   els.insightTitle.innerHTML = `${escapeHtml(type)} never needed more than <span>${peak.active}</span> spaces at once.`;
   els.insightCopy.textContent = `${unusedAtPeak} of ${spaces.length} ${type.toLowerCase()} spaces were available at the selected peak. Each space averaged ${number(usage.avgHoursPerSpacePerDay)} hours of use per selected day; median space use was ${number(usage.medianHoursPerSpacePerDay)} hours/day. ${usage.shortageHours} selected hours crossed ${Math.round(shortageThreshold * 100)}% active, and ${meaningful} spaces averaged more than 1 hour/day.`;
   els.spaceGrid.replaceChildren(
-    ...spaces.map((space, index) => {
+    ...spaces.map((space) => {
       const node = document.createElement("button");
       const metric = spaceMetrics.find((item) => item.spaceId === space.spaceId);
       const activeAtPeak = peak.spaceIds.has(space.spaceId);
       node.type = "button";
       node.className = `space-dot ${activeAtPeak ? "peak" : ""} ${metric?.usedMinutes ? "used" : ""}`;
       node.title = `${space.spaceName}: ${number(metric?.avgHoursPerDay || 0)} avg hrs/day`;
-      node.textContent = index + 1;
       node.addEventListener("click", () => {
         state.selectedSpaceId = state.selectedSpaceId === space.spaceId ? null : space.spaceId;
         renderSpaceTable(computeSpaceMetrics(filteredIntervals(), filteredSpaces()));
       });
       return node;
     })
-  );
-}
-
-function renderTypeBars() {
-  const byType = state.data.dimensions.types.map((type, index) => {
-    const rows = filteredIntervals(type);
-    const spaces = filteredSpaces(type);
-    const peak = peakSnapshot(rows);
-    const metrics = computeSpaceMetrics(rows, spaces);
-    const usage = selectedUsageSummary(rows, spaces, metrics);
-    return { type, spaces: spaces.length, index, peakActive: peak.active, ...usage };
-  });
-  const maxAvg = Math.max(...byType.map((row) => row.avgHoursPerSpacePerDay), 0.1);
-  els.typeBars.replaceChildren(
-    ...byType
-      .sort((a, b) => b.avgHoursPerSpacePerDay - a.avgHoursPerSpacePerDay)
-      .map((row) => {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = `bar-row type-row ${row.type === state.filters.type ? "selected" : ""}`;
-        item.innerHTML = `
-          <strong>${escapeHtml(row.type)}</strong>
-          <div class="track"><div class="bar" style="width:${Math.max(2, (row.avgHoursPerSpacePerDay / maxAvg) * 100)}%; background:${colors[row.index % colors.length]}"></div></div>
-          <span>${number(row.avgHoursPerSpacePerDay)}h/space/day · peak ${row.peakActive}/${row.spaces}</span>
-        `;
-        item.addEventListener("click", () => {
-          state.filters.type = row.type;
-          els.typeFilter.value = row.type;
-          state.selectedSpaceId = null;
-          render();
-        });
-        return item;
-      })
   );
 }
 
@@ -423,7 +483,7 @@ function renderWeekdayLines(rows, totalSpaces) {
   const pad = { left: 48, right: 18, top: 28, bottom: 34 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
-  const pointsByDay = selectedDays.map((day, dayIndex) => {
+  const pointsByDay = selectedDays.map((day, dayIndexValue) => {
     const points = hourRange.map((hour, index) => {
       const hourRows = rows.filter((row) => row.day === day && row.hour === hour);
       const share = totalSpaces ? averageActiveSpaces(hourRows) / totalSpaces : 0;
@@ -433,10 +493,10 @@ function renderWeekdayLines(rows, totalSpaces) {
         share,
         x: pad.left + (hourRange.length <= 1 ? 0 : (index / (hourRange.length - 1)) * innerW),
         y: pad.top + innerH - share * innerH,
-        color: colors[dayIndex % colors.length]
+        color: colors[dayIndexValue % colors.length]
       };
     });
-    return { day, points, color: colors[dayIndex % colors.length] };
+    return { day, points, color: colors[dayIndexValue % colors.length] };
   });
   const grid = [0, 0.25, 0.5, 0.75, 1];
   els.weekdayLines.innerHTML = `
@@ -466,14 +526,13 @@ function renderWeekdayLines(rows, totalSpaces) {
 }
 
 function renderDailyTable(rows) {
-  const grouped = [...groupBy(rows, (row) => `${row.date}|${row.floorId}`)].map(([id, group]) => {
+  const grouped = [...groupBy(rows, (row) => `${row.date}|${row.floorId}`)].map(([, group]) => {
     const first = group[0];
     const floorSpaces = filteredSpaces().filter((space) => space.floorId === first.floorId);
     const spaceMetrics = computeSpaceMetrics(group, floorSpaces, [first.date]);
     const usage = selectedUsageSummary(group, floorSpaces, spaceMetrics, [first.date]);
     const activeSpaces = new Set(group.filter((row) => row.usedMinutes > 0).map((row) => row.spaceId)).size;
     return {
-      id,
       date: first.date,
       day: first.day,
       buildingName: buildingName(first.buildingId),
@@ -481,9 +540,8 @@ function renderDailyTable(rows) {
       type: first.type,
       activeSpaces,
       peakActive: peakSnapshot(group).active,
-      shortageHours: usage.shortageHours,
       avgHoursPerSpace: floorSpaces.length ? combine(group).usedHours / floorSpaces.length : 0,
-      ...combine(group)
+      shortageHours: usage.shortageHours
     };
   });
   els.dailyTable.replaceChildren(
@@ -508,21 +566,19 @@ function renderDailyTable(rows) {
 }
 
 function renderWeeklyTable(rows) {
-  const grouped = [...groupBy(rows, (row) => `${mondayOf(row.date)}|${row.floorId}`)].map(([id, group]) => {
+  const grouped = [...groupBy(rows, (row) => `${mondayOf(row.date)}|${row.floorId}`)].map(([, group]) => {
     const first = group[0];
     const floorSpaces = filteredSpaces().filter((space) => space.floorId === first.floorId);
     const dates = unique(group.map((row) => row.date));
     const spaceMetrics = computeSpaceMetrics(group, floorSpaces, dates);
     const usage = selectedUsageSummary(group, floorSpaces, spaceMetrics, dates);
     return {
-      id,
       weekStart: mondayOf(first.date),
       buildingName: buildingName(first.buildingId),
       floorName: floorName(first.floorId),
       type: first.type,
       peakActive: peakSnapshot(group).active,
-      ...usage,
-      ...combine(group)
+      ...usage
     };
   });
   els.weeklyTable.replaceChildren(
@@ -574,11 +630,129 @@ function renderSpaceTable(spaceMetrics) {
         state.selectedSpaceId = state.selectedSpaceId === row.spaceId ? null : row.spaceId;
         renderSpaceTable(spaceMetrics);
       });
-      const rows = [tr];
-      if (row.spaceId === state.selectedSpaceId) rows.push(detailRow(row));
-      return rows;
+      const result = [tr];
+      if (row.spaceId === state.selectedSpaceId) result.push(detailRow(row));
+      return result;
     })
   );
+}
+
+function renderComparisonBars(container, metrics, key, suffix, whole) {
+  const max = Math.max(...metrics.map((metric) => metric[key]), 0.1);
+  container.replaceChildren(
+    ...metrics.map((metric, index) => {
+      const item = document.createElement("div");
+      item.className = "bar-row";
+      item.innerHTML = `
+        <strong>${escapeHtml(metric.type)}</strong>
+        <div class="track"><div class="bar" style="width:${Math.max(2, (metric[key] / max) * 100)}%; background:${colors[index % colors.length]}"></div></div>
+        <span>${whole ? number(metric[key], 0) : number(metric[key])} ${suffix}</span>
+      `;
+      return item;
+    })
+  );
+}
+
+function renderTypeHourGrid(metrics) {
+  const hourRange = range(state.filters.startHour, state.filters.endHour);
+  const maxShare = Math.max(
+    ...metrics.flatMap((metric) =>
+      hourRange.map((hour) => {
+        const hourRows = metric.rows.filter((row) => row.hour === hour);
+        return metric.spaces ? averageActiveSpaces(hourRows) / metric.spaces : 0;
+      })
+    ),
+    0.01
+  );
+  const cells = [label("Type")].concat(hourRange.map((hour) => label(formatHour(hour))));
+  for (const metric of metrics) {
+    cells.push(label(metric.type));
+    for (const hour of hourRange) {
+      const hourRows = metric.rows.filter((row) => row.hour === hour);
+      const share = metric.spaces ? averageActiveSpaces(hourRows) / metric.spaces : 0;
+      const cell = document.createElement("div");
+      cell.className = "heatmap-cell";
+      cell.style.background = `rgb(40 124 116 / ${0.08 + (share / maxShare) * 0.72})`;
+      cell.textContent = `${Math.round(share * 100)}%`;
+      cell.title = `${metric.type} ${formatHour(hour)}: ${Math.round(share * 100)}% active`;
+      cells.push(cell);
+    }
+  }
+  els.comparisonTypeHour.style.gridTemplateColumns = `120px repeat(${hourRange.length}, minmax(54px, 1fr))`;
+  els.comparisonTypeHour.replaceChildren(...cells);
+}
+
+function renderBuildingBreakdown() {
+  const buildings = state.data.dimensions.buildings.filter((building) => setMatches(state.filters.buildingIds, building.buildingId));
+  const cards = [];
+  for (const type of state.data.dimensions.types) {
+    const typeCard = document.createElement("div");
+    typeCard.className = "breakdown-card";
+    const rows = buildings.map((building) => {
+      const spaces = filteredSpaces(type).filter((space) => space.buildingId === building.buildingId);
+      const intervalRows = filteredIntervals(type).filter((row) => row.buildingId === building.buildingId);
+      const metrics = computeSpaceMetrics(intervalRows, spaces);
+      const usage = selectedUsageSummary(intervalRows, spaces, metrics);
+      return { building, spaces, usage, peak: peakSnapshot(intervalRows) };
+    });
+    typeCard.innerHTML = `
+      <h3>${escapeHtml(type)}</h3>
+      ${rows
+        .map(
+          ({ building, spaces, usage, peak }) => `
+            <div class="breakdown-row">
+              <strong>${escapeHtml(shortBuildingName(building.buildingName))}</strong>
+              <span>${spaces.length} spaces</span>
+              <span>${number(usage.avgHoursPerSpacePerDay)}h/space/day</span>
+              <span>peak ${peak.active}/${spaces.length}</span>
+            </div>
+          `
+        )
+        .join("")}
+    `;
+    cards.push(typeCard);
+  }
+  els.comparisonBuildingBreakdown.replaceChildren(...cards);
+}
+
+function renderComparisonTable(metrics) {
+  els.comparisonTable.replaceChildren(
+    ...metrics.map((metric) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(metric.type)}</td>
+        <td>${metric.spaces}</td>
+        <td>${number(metric.avgHoursPerSpacePerDay)}h</td>
+        <td>${number(metric.medianHoursPerSpacePerDay)}h</td>
+        <td>${metric.peakActive}/${metric.spaces}</td>
+        <td>${Math.round(metric.peakShare * 100)}%</td>
+        <td>${number(metric.shortageHours, 0)}</td>
+        <td>${metric.activeMeaningful}</td>
+        <td>${metric.underused}</td>
+        <td>${metric.busiest}</td>
+      `;
+      return tr;
+    })
+  );
+}
+
+function renderBenchmarkContext(metrics) {
+  if (!state.benchmark) {
+    els.benchmarkPanel.hidden = true;
+    return;
+  }
+  els.benchmarkPanel.hidden = false;
+  const items = Array.isArray(state.benchmark) ? state.benchmark : state.benchmark.items || state.benchmark.benchmarks || [];
+  const note = state.benchmark.summary || state.benchmark.note || "Benchmark context loaded.";
+  els.benchmarkContent.innerHTML = `
+    <p>${escapeHtml(note)}</p>
+    <div class="benchmark-grid">
+      ${items
+        .slice(0, 8)
+        .map((item) => `<article><strong>${escapeHtml(item.label || item.name || item.type || "Benchmark")}</strong><span>${escapeHtml(item.value ?? item.summary ?? item.description ?? "")}</span></article>`)
+        .join("")}
+    </div>
+  `;
 }
 
 function sortValue(space, key) {
@@ -633,7 +807,7 @@ function renderCoverageNotes() {
   const { metadata, dimensions } = state.data;
   const notes = [
     `Loaded buildings: ${dimensions.buildings.map((building) => building.buildingName).join(", ")}.`,
-    `Loaded range: ${metadata.includedRange.start} to ${metadata.includedRange.end}; current filters: ${state.filters.startDate} to ${state.filters.endDate}, ${selectedDayLabels()}, ${formatHour(state.filters.startHour)}-${formatHour(state.filters.endHour)}.`,
+    `Current filters: ${state.filters.startDate} to ${state.filters.endDate}, ${selectedDayLabels()}, ${formatHour(state.filters.startHour)}-${formatHour(state.filters.endHour)}, ${selectedBuildingLabel()}, ${selectedFloorLabel()}.`,
     `${dimensions.spaces.length.toLocaleString()} non-bookable target spaces are available in the dashboard.`,
     `All loaded spaces exclude meeting_room function: ${dimensions.spaces.every((space) => space.function !== "meeting_room") ? "yes" : "no"}.`
   ];
@@ -646,11 +820,39 @@ function renderCoverageNotes() {
   );
 }
 
-function label(text) {
-  const node = document.createElement("div");
-  node.className = "heatmap-label";
-  node.textContent = text;
-  return node;
+function selectedUsageSummary(rows, spaces, spaceMetrics, datesOverride = selectedDates()) {
+  const total = combine(rows);
+  const dates = datesOverride.length ? datesOverride : selectedDates();
+  const spaceCount = spaces.length;
+  const shortageHours = shortageSnapshots(rows, spaceCount).length;
+  return {
+    usedMinutes: total.usedMinutes,
+    availableMinutes: total.availableMinutes,
+    usedHours: total.usedHours,
+    availableHours: total.availableHours,
+    avgHoursPerSpacePerDay:
+      spaceCount && dates.length ? total.usedHours / spaceCount / dates.length : 0,
+    medianHoursPerSpacePerDay: median(spaceMetrics.map((space) => space.avgHoursPerDay)),
+    shortageHours
+  };
+}
+
+function shortageSnapshots(rows, totalSpaces) {
+  if (!totalSpaces) return [];
+  return [...groupBy(rows, (row) => row.timestamp)]
+    .map(([timestamp, group]) => {
+      const active = new Set(group.filter((row) => row.usedMinutes > 0).map((row) => row.spaceId)).size;
+      const first = group[0];
+      return {
+        timestamp,
+        active,
+        share: active / totalSpaces,
+        date: first?.date,
+        day: first?.day,
+        hour: first?.hour
+      };
+    })
+    .filter((snapshot) => snapshot.share >= shortageThreshold);
 }
 
 function averageActiveSpaces(rows) {
@@ -693,68 +895,25 @@ function mostUsedHourLabel(rows) {
   return top ? `${dayNames[top.day]} ${formatHour(top.hour)}` : "-";
 }
 
-function selectedUsageSummary(rows, spaces, spaceMetrics, datesOverride = selectedDates()) {
-  const total = combine(rows);
-  const dates = datesOverride.length ? datesOverride : selectedDates();
-  const spaceCount = spaces.length;
-  const shortageHours = shortageSnapshots(rows, spaceCount).length;
-  return {
-    usedMinutes: total.usedMinutes,
-    availableMinutes: total.availableMinutes,
-    usedHours: total.usedHours,
-    availableHours: total.availableHours,
-    avgHoursPerSpacePerDay:
-      spaceCount && dates.length ? total.usedHours / spaceCount / dates.length : 0,
-    medianHoursPerSpacePerDay: median(spaceMetrics.map((space) => space.avgHoursPerDay)),
-    shortageHours
-  };
-}
-
-function shortageSnapshots(rows, totalSpaces) {
-  if (!totalSpaces) return [];
-  return [...groupBy(rows, (row) => row.timestamp)]
-    .map(([timestamp, group]) => {
-      const active = new Set(group.filter((row) => row.usedMinutes > 0).map((row) => row.spaceId)).size;
-      const first = group[0];
-      return {
-        timestamp,
-        active,
-        share: active / totalSpaces,
-        date: first?.date,
-        day: first?.day,
-        hour: first?.hour
-      };
-    })
-    .filter((snapshot) => snapshot.share >= shortageThreshold);
-}
-
 function busiestHour(rows) {
   const top = [...groupBy(rows, (row) => `${row.day}-${row.hour}`)]
     .map(([id, group]) => {
       const [day, hour] = id.split("-").map(Number);
-      return {
-        day,
-        hour,
-        minutes: sum(group, "usedMinutes")
-      };
+      return { day, hour, minutes: sum(group, "usedMinutes") };
     })
     .sort((a, b) => b.minutes - a.minutes)[0];
   return top && top.minutes > 0 ? `${dayNames[top.day]} ${formatHour(top.hour)}` : "-";
 }
 
+function label(text) {
+  const node = document.createElement("div");
+  node.className = "heatmap-label";
+  node.textContent = text;
+  return node;
+}
+
 function selectedDateCount(dayFilter = null) {
-  const dates = new Set(
-    state.rows
-      .filter(
-        (row) =>
-          row.date >= state.filters.startDate &&
-          row.date <= state.filters.endDate &&
-          state.filters.days.has(row.day) &&
-          (dayFilter == null || row.day === dayFilter)
-      )
-      .map((row) => row.date)
-  );
-  return dates.size;
+  return selectedDates(dayFilter).length;
 }
 
 function selectedDates(dayFilter = null) {
@@ -775,15 +934,14 @@ function selectedDayLabels() {
   return [...state.filters.days].sort((a, b) => a - b).map((day) => dayNames[day]).join(", ");
 }
 
-function median(values) {
-  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
-  if (!sorted.length) return 0;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+function selectedBuildingLabel() {
+  if (state.filters.buildingIds.has("all")) return "All buildings";
+  return [...state.filters.buildingIds].map(buildingName).map(shortBuildingName).join(", ");
 }
 
-function unique(values) {
-  return [...new Set(values)].sort();
+function selectedFloorLabel() {
+  if (state.filters.floorIds.has("all")) return "All floors";
+  return [...state.filters.floorIds].map(floorName).join(", ");
 }
 
 function buildingName(id) {
@@ -792,6 +950,10 @@ function buildingName(id) {
 
 function floorName(id) {
   return state.data.dimensions.floors.find((floor) => floor.floorId === id)?.floorName || id;
+}
+
+function shortBuildingName(name) {
+  return String(name).split(" - ")[0];
 }
 
 function groupBy(rows, getKey) {
@@ -806,6 +968,17 @@ function groupBy(rows, getKey) {
 
 function sum(rows, key) {
   return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+}
+
+function median(values) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function unique(values) {
+  return [...new Set(values)].sort();
 }
 
 function utilization(row) {
