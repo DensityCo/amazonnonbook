@@ -38,6 +38,7 @@ const els = {
   kpiUsed: document.querySelector("#kpi-used"),
   kpiSpaces: document.querySelector("#kpi-spaces"),
   kpiPeak: document.querySelector("#kpi-peak"),
+  benchmarkSummary: document.querySelector("#benchmark-summary"),
   typeBars: document.querySelector("#type-bars"),
   heatmap: document.querySelector("#heatmap"),
   weekdayLines: document.querySelector("#weekday-lines"),
@@ -232,6 +233,7 @@ function render() {
   els.kpiActiveSpaces.textContent = `${activeMeaningful}/${spaces.length}`;
 
   renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage);
+  renderBenchmarkSummary();
   renderTypeBars();
   renderHeatmap(rows, spaces.length);
   renderWeekdayLines(rows, spaces.length);
@@ -364,7 +366,8 @@ function renderTypeBars() {
     const peak = peakSnapshot(rows);
     const metrics = computeSpaceMetrics(rows, spaces);
     const usage = selectedUsageSummary(rows, spaces, metrics);
-    return { type, spaces: spaces.length, index, peakActive: peak.active, ...usage };
+    const benchmark = benchmarkRollup(type);
+    return { type, spaces: spaces.length, index, peakActive: peak.active, benchmark, ...usage };
   });
   const maxAvg = Math.max(...byType.map((row) => row.avgHoursPerSpacePerDay), 0.1);
   els.typeBars.replaceChildren(
@@ -377,7 +380,7 @@ function renderTypeBars() {
         item.innerHTML = `
           <strong>${escapeHtml(row.type)}</strong>
           <div class="track"><div class="bar" style="width:${Math.max(2, (row.avgHoursPerSpacePerDay / maxAvg) * 100)}%; background:${colors[row.index % colors.length]}"></div></div>
-          <span>${number(row.avgHoursPerSpacePerDay)}h/space/day · peak ${row.peakActive}/${row.spaces}</span>
+          <span>${number(row.avgHoursPerSpacePerDay)}h/space/day · peak ${row.peakActive}/${row.spaces}${row.benchmark ? ` · ${benchmarkBadge(row.benchmark)}` : ""}</span>
         `;
         item.addEventListener("click", () => {
           state.filters.type = row.type;
@@ -388,6 +391,106 @@ function renderTypeBars() {
         return item;
       })
   );
+}
+
+function renderBenchmarkSummary() {
+  const entries = benchmarkEntries().filter((entry) => entry.type === state.filters.type);
+  const metadata = state.data.benchmarks?.metadata;
+
+  if (!metadata || metadata.status === "skipped" || !entries.length) {
+    els.benchmarkSummary.replaceChildren(emptyBenchmarkState(metadata));
+    return;
+  }
+
+  const rollup = benchmarkRollup(state.filters.type);
+  const concernRows = entries
+    .flatMap((entry) =>
+      (entry.timeUsed?.evaluations || [])
+        .filter((evaluation) => evaluation.status !== "in_range")
+        .map((evaluation) => ({ entry, evaluation }))
+    )
+    .sort((a, b) => Math.abs(b.evaluation.peerPercentile - 50) - Math.abs(a.evaluation.peerPercentile - 50))
+    .slice(0, 5);
+
+  const cards = [
+    benchmarkCard("Healthy indicators", `${rollup.inRange}/${rollup.total}`, `${rollup.floors} floor/type benchmarks`),
+    benchmarkCard("Floors with concerns", `${rollup.concernFloors}`, "at least one out-of-range indicator"),
+    benchmarkCard("Benchmark match", rollup.mappedBenchmark.replaceAll("_", " "), "Density portfolio panel")
+  ];
+
+  const list = document.createElement("div");
+  list.className = "benchmark-concerns";
+  if (concernRows.length) {
+    list.replaceChildren(
+      ...concernRows.map(({ entry, evaluation }) => {
+        const item = document.createElement("article");
+        item.innerHTML = `
+          <strong>${escapeHtml(floorName(entry.floorId))}</strong>
+          <span>${escapeHtml(labelForIndicator(evaluation.indicator))}: ${escapeHtml(statusLabel(evaluation.status))}, p${number(evaluation.peerPercentile, 0)}</span>
+          <small>${escapeHtml(evaluation.reason || "")}</small>
+        `;
+        return item;
+      })
+    );
+  } else {
+    const item = document.createElement("article");
+    item.innerHTML = `<strong>No benchmark concerns</strong><span>All evaluated indicators are in range for the current selection.</span>`;
+    list.append(item);
+  }
+
+  els.benchmarkSummary.replaceChildren(...cards, list);
+}
+
+function emptyBenchmarkState(metadata) {
+  const node = document.createElement("div");
+  node.className = "benchmark-empty";
+  const reason = metadata?.reason || "Run npm run build:api with density-bench linked or DENSITY_BENCH_CLI set.";
+  node.textContent = `No benchmark results available. ${reason}`;
+  return node;
+}
+
+function benchmarkCard(label, value, detail) {
+  const card = document.createElement("article");
+  card.className = "benchmark-card";
+  card.innerHTML = `
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(value)}</strong>
+    <small>${escapeHtml(detail)}</small>
+  `;
+  return card;
+}
+
+function benchmarkEntries() {
+  return (state.data.benchmarks?.byFloorType || []).filter(
+    (entry) =>
+      (state.filters.buildingId === "all" || entry.buildingId === state.filters.buildingId) &&
+      (state.filters.floorId === "all" || entry.floorId === state.filters.floorId)
+  );
+}
+
+function benchmarkRollup(type) {
+  const entries = benchmarkEntries().filter((entry) => entry.type === type);
+  if (!entries.length) return null;
+  const totals = entries.reduce(
+    (acc, entry) => {
+      const summary = entry.timeUsed?.summary || {};
+      acc.inRange += Number(summary.in_range) || 0;
+      acc.total += Number(summary.total) || 0;
+      if ((summary.concerns || []).length) acc.concernFloors += 1;
+      return acc;
+    },
+    { inRange: 0, total: 0, concernFloors: 0 }
+  );
+  return {
+    ...totals,
+    floors: entries.length,
+    mappedBenchmark: entries[0].mappedBenchmark || "time_used"
+  };
+}
+
+function benchmarkBadge(rollup) {
+  if (!rollup.total) return "benchmark pending";
+  return `${rollup.inRange}/${rollup.total} healthy`;
 }
 
 function renderHeatmap(rows, totalSpaces) {
@@ -846,6 +949,14 @@ function formatHour(hour) {
 
 function formatDayUsage(day) {
   return `${day.label} ${number(day.hours)}h`;
+}
+
+function labelForIndicator(indicator) {
+  return String(indicator).replaceAll("_", " ");
+}
+
+function statusLabel(status) {
+  return String(status).replaceAll("_", " ");
 }
 
 function hoursBar(value, max) {

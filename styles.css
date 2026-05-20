@@ -270,6 +270,72 @@ input {
   line-height: 1.1;
 }
 
+.benchmark-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 0.8fr)) minmax(280px, 1.6fr);
+  gap: 12px;
+  padding: 16px;
+}
+
+.benchmark-card,
+.benchmark-concerns article,
+.benchmark-empty {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.benchmark-card {
+  min-height: 112px;
+  padding: 14px;
+}
+
+.benchmark-card span,
+.benchmark-card small,
+.benchmark-concerns span,
+.benchmark-concerns small,
+.benchmark-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.benchmark-card span,
+.benchmark-card small,
+.benchmark-concerns span,
+.benchmark-concerns small {
+  display: block;
+}
+
+.benchmark-card strong {
+  display: block;
+  margin: 10px 0 8px;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.benchmark-concerns {
+  display: grid;
+  gap: 8px;
+}
+
+.benchmark-concerns article {
+  padding: 12px;
+}
+
+.benchmark-concerns strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.benchmark-concerns small {
+  margin-top: 4px;
+}
+
+.benchmark-empty {
+  grid-column: 1 / -1;
+  padding: 14px;
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -601,6 +667,7 @@ tbody tr:hover {
 
   .filters,
   .kpis,
+  .benchmark-summary,
   .insight,
   .grid.two {
     grid-template-columns: 1fr;

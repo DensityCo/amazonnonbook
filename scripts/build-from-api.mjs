@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { enrichBenchmarks } from "./benchmarks.mjs";
 
 const tokenPath = process.env.DENSITY_API_TOKEN_FILE || "env/density-api-token.txt";
 const outputPath = process.argv[2] || path.join("data", "dashboard-data.json");
@@ -552,9 +553,16 @@ const dashboardData = buildDashboardData(spaceCatalog, metricRows, {
       : []
 });
 
+dashboardData.benchmarks = await enrichBenchmarks(dashboardData);
+if (dashboardData.benchmarks.metadata.status !== "ok") {
+  dashboardData.metadata.warnings.push(
+    `Benchmark enrichment ${dashboardData.benchmarks.metadata.status}: ${dashboardData.benchmarks.metadata.reason || dashboardData.benchmarks.metadata.warnings?.join("; ") || "no benchmark results"}`
+  );
+}
+
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(dashboardData, null, 2)}\n`);
 
 console.log(
-  `Wrote ${outputPath}: ${metricRows.length.toLocaleString()} metric rows, ${spaceCatalog.length} spaces from Density API.`
+  `Wrote ${outputPath}: ${metricRows.length.toLocaleString()} metric rows, ${spaceCatalog.length} spaces, ${dashboardData.benchmarks.byFloorType.length} benchmark rows from Density API.`
 );
