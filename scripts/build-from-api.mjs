@@ -117,6 +117,9 @@ function labelsFor(space) {
 function targetType(labels, space) {
   for (const label of labels) {
     const normalized = label.trim().toLowerCase();
+    if (normalized === "phone" && space.function === "phone_booth") {
+      return "Phone Booths";
+    }
     if (targetLabels.has(normalized)) return targetLabels.get(normalized);
   }
   const fallback = String(space.function || "").replaceAll("_", " ").toLowerCase();

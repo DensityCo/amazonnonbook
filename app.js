@@ -431,8 +431,8 @@ function renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage) {
   const unusedAtPeak = Math.max(spaces.length - peak.active, 0);
 
   els.insightScope.textContent = scope.join(" · ");
-  els.insightTitle.innerHTML = `${escapeHtml(type)} never needed more than <span>${peak.active}</span> spaces at once.`;
-  els.insightCopy.textContent = `${unusedAtPeak} of ${spaces.length} ${type.toLowerCase()} spaces were available at the selected peak. Each space averaged ${number(usage.avgHoursPerSpacePerDay)} hours of use per selected day; median space use was ${number(usage.medianHoursPerSpacePerDay)} hours/day. ${usage.shortageHours} selected hours crossed ${Math.round(shortageThreshold * 100)}% active, and ${meaningful} spaces averaged more than 1 hour/day.`;
+  els.insightTitle.innerHTML = `${escapeHtml(selectedLocationLabel())} never needed more than <span>${peak.active}</span> ${escapeHtml(type.toLowerCase())} at once from ${escapeHtml(state.filters.startDate)} to ${escapeHtml(state.filters.endDate)}.`;
+  els.insightCopy.textContent = `${unusedAtPeak} of ${spaces.length} ${type.toLowerCase()} were still available at peak demand. Each space averaged ${number(usage.avgHoursPerSpacePerDay)} hours of use per selected day; median space use was ${number(usage.medianHoursPerSpacePerDay)} hours/day. Usage was heaviest around ${mostUsedHourLabel(rows)}, and ${meaningful} spaces averaged more than 1 hour/day.`;
   els.spaceGrid.replaceChildren(
     ...spaces.map((space) => {
       const node = document.createElement("button");
@@ -942,6 +942,15 @@ function selectedBuildingLabel() {
 function selectedFloorLabel() {
   if (state.filters.floorIds.has("all")) return "All floors";
   return [...state.filters.floorIds].map(floorName).join(", ");
+}
+
+function selectedLocationLabel() {
+  const building = selectedBuildingLabel();
+  const floor = selectedFloorLabel();
+  if (building === "All buildings" && floor === "All floors") return "The selected portfolio";
+  if (floor === "All floors") return building;
+  if (building === "All buildings") return floor;
+  return `${building} ${floor}`;
 }
 
 function buildingName(id) {

@@ -79,9 +79,12 @@ function readCsvObjects(filePath) {
   );
 }
 
-function labelType(labels) {
+function labelType(labels, row = {}) {
   for (const label of labels) {
     const normalized = label.trim().toLowerCase();
+    if (normalized === "phone" && row.FUNCTION === "phone_booth") {
+      return "Phone Booths";
+    }
     if (targetLabels.has(normalized)) return targetLabels.get(normalized);
   }
   return null;
@@ -198,7 +201,7 @@ for (const row of spaces) {
   const hasNonBookable = labels.some(
     (label) => label.trim().toLowerCase() === "non bookable"
   );
-  const type = labelType(labels);
+  const type = labelType(labels, row);
   const { date, hour } = dateHour(row.LOCAL_DATE_TIME);
   const localDate = new Date(`${date}T00:00:00`);
   const day = localDate.getDay();
