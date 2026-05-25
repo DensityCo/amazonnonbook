@@ -1,6 +1,6 @@
-# Amazon Non-Bookable Space Usage Dashboard
+# Amazon Sensor-Backed Space Usage Dashboard
 
-Static dashboard for exploring utilization of non-bookable spaces in Amazon pilot buildings.
+Static dashboard for exploring utilization of sensor-backed spaces in Amazon pilot buildings.
 
 The checked-in sample data is generated from:
 
@@ -31,7 +31,13 @@ Then build from the Density API:
 npm run build:api
 ```
 
-This uses `/v3/spaces` to find non-bookable labeled target spaces under the pilot building IDs, then `/v3/analytics/time-used` at hourly resolution for April 20-May 15, 2026 with M-F 9am-5pm operating hours.
+This uses `/v3/spaces` to find spaces under the pilot building IDs, `/v3/analytics/presence-health` to keep only spaces with `healthy`, `degraded`, or `offline` presence-health status, then `/v3/analytics/time-used` at hourly resolution for April 20-May 15, 2026 with M-F 9am-5pm operating hours.
+
+To rerun only the presence-health audit:
+
+```sh
+npm run audit:presence-health
+```
 
 ## Dashboard Views
 
@@ -55,16 +61,16 @@ The dashboard will show that context at the top of the Space Type Comparison tab
 Latest local generated audit:
 
 - 4 buildings
-- 27 floors
-- 143 scoped non-bookable spaces
-- 22,880 hourly metric rows
-- 3,304.76 used hours
-- 14.4% overall utilization
+- 29 floors
+- 289 spaces with confirmed presence sensors
+- 46,240 hourly metric rows
+- 7,734.53 used hours
+- 16.7% overall utilization
 
 ## Scope Rules
 
 - Local business hours: Monday-Friday, 9am-5pm, using `LOCAL_DATE_TIME`.
-- Non-bookable spaces are identified via the `Non Bookable` label.
-- Target types come from labels, not `FUNCTION`.
-- Rows where `FUNCTION` is `meeting_room` are excluded.
+- Only spaces with `/v3/analytics/presence-health` status `healthy`, `degraded`, or `offline` are included.
+- `unknown` and spaces not returned by the presence-health endpoint are excluded.
+- Target types come from normalized labels first, then `FUNCTION`/space name fallback.
 - Utilization is computed as `sum(TIME_USED_MINUTES) / available interval minutes`.

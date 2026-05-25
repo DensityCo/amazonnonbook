@@ -100,9 +100,9 @@ function setupFilters() {
 
   setOptions(
     els.typeFilter,
-    rankedTypes.map(({ type, spaces }) => ({
+    rankedTypes.map(({ type }) => ({
       value: type,
-      label: `${type} (${spaces})`
+      label: type
     }))
   );
   els.typeFilter.value = state.filters.type;
@@ -210,7 +210,7 @@ function renderDetail() {
 
   els.kpiUtilization.textContent = `${number(usage.avgHoursPerSpacePerDay)}h`;
   els.kpiUsed.textContent = `${number(usage.medianHoursPerSpacePerDay)}h`;
-  els.kpiSpaces.textContent = `${number(usage.shortageHours, 0)}h`;
+  els.kpiSpaces.textContent = formatShare(usage.shortageRiskShare);
   els.kpiPeak.textContent = `${activeMeaningful}/${spaces.length}`;
   els.kpiPeakDemand.textContent = `${peak.active}/${spaces.length}`;
   els.kpiPeakDemandSub.textContent = peak.active ? `${peak.dayLabel} ${peak.date} ${formatHour(peak.hour)}` : "No usage";
@@ -253,7 +253,14 @@ function renderComparison() {
 
   renderBenchmarkContext(metrics);
   renderComparisonBars(els.comparisonUsageBars, metrics, "avgHoursPerSpacePerDay", "h/space/day", false);
-  renderComparisonBars(els.comparisonShortageBars, metrics, "shortageHours", "shortage hrs", true);
+  renderComparisonBars(
+    els.comparisonShortageBars,
+    metrics,
+    "shortageRiskShare",
+    "of time",
+    false,
+    formatShare
+  );
   renderTypeHourGrid(metrics);
   renderBuildingBreakdown();
   renderComparisonTable(metrics);
@@ -541,7 +548,7 @@ function renderDailyTable(rows) {
       activeSpaces,
       peakActive: peakSnapshot(group).active,
       avgHoursPerSpace: floorSpaces.length ? combine(group).usedHours / floorSpaces.length : 0,
-      shortageHours: usage.shortageHours
+      shortageRiskShare: usage.shortageRiskShare
     };
   });
   els.dailyTable.replaceChildren(
@@ -558,7 +565,7 @@ function renderDailyTable(rows) {
           <td>${row.activeSpaces}</td>
           <td>${number(row.avgHoursPerSpace)}h</td>
           <td>${row.peakActive}</td>
-          <td>${number(row.shortageHours, 0)}</td>
+          <td>${formatShare(row.shortageRiskShare)}</td>
         `;
         return tr;
       })
@@ -594,7 +601,7 @@ function renderWeeklyTable(rows) {
           <td>${number(row.avgHoursPerSpacePerDay)}h</td>
           <td>${number(row.medianHoursPerSpacePerDay)}h</td>
           <td>${row.peakActive}</td>
-          <td>${number(row.shortageHours, 0)}</td>
+          <td>${formatShare(row.shortageRiskShare)}</td>
         `;
         return tr;
       })
@@ -637,16 +644,19 @@ function renderSpaceTable(spaceMetrics) {
   );
 }
 
-function renderComparisonBars(container, metrics, key, suffix, whole) {
+function renderComparisonBars(container, metrics, key, suffix, whole, formatter = null) {
   const max = Math.max(...metrics.map((metric) => metric[key]), 0.1);
   container.replaceChildren(
     ...metrics.map((metric, index) => {
+      const value = formatter
+        ? formatter(metric[key])
+        : `${whole ? number(metric[key], 0) : number(metric[key])} ${suffix}`;
       const item = document.createElement("div");
       item.className = "bar-row";
       item.innerHTML = `
         <strong>${escapeHtml(metric.type)}</strong>
         <div class="track"><div class="bar" style="width:${Math.max(2, (metric[key] / max) * 100)}%; background:${colors[index % colors.length]}"></div></div>
-        <span>${whole ? number(metric[key], 0) : number(metric[key])} ${suffix}</span>
+        <span>${value}${formatter ? ` ${suffix}` : ""}</span>
       `;
       return item;
     })
@@ -726,7 +736,7 @@ function renderComparisonTable(metrics) {
         <td>${number(metric.medianHoursPerSpacePerDay)}h</td>
         <td>${metric.peakActive}/${metric.spaces}</td>
         <td>${Math.round(metric.peakShare * 100)}%</td>
-        <td>${number(metric.shortageHours, 0)}</td>
+        <td>${formatShare(metric.shortageRiskShare)}</td>
         <td>${metric.activeMeaningful}</td>
         <td>${metric.underused}</td>
         <td>${metric.busiest}</td>
@@ -805,11 +815,14 @@ function detailRow(space) {
 
 function renderCoverageNotes() {
   const { metadata, dimensions } = state.data;
+  const includedHealthStatuses =
+    metadata.apiAudit?.includedPresenceHealthStatuses?.join(", ") ||
+    "healthy, degraded, offline";
   const notes = [
     `Loaded buildings: ${dimensions.buildings.map((building) => building.buildingName).join(", ")}.`,
     `Current filters: ${state.filters.startDate} to ${state.filters.endDate}, ${selectedDayLabels()}, ${formatHour(state.filters.startHour)}-${formatHour(state.filters.endHour)}, ${selectedBuildingLabel()}, ${selectedFloorLabel()}.`,
-    `${dimensions.spaces.length.toLocaleString()} non-bookable target spaces are available in the dashboard.`,
-    `All loaded spaces exclude meeting_room function: ${dimensions.spaces.every((space) => space.function !== "meeting_room") ? "yes" : "no"}.`
+    `${dimensions.spaces.length.toLocaleString()} spaces with confirmed presence sensors are available in the dashboard.`,
+    `Presence-health statuses included: ${includedHealthStatuses}.`
   ];
   els.coverageNotes.replaceChildren(
     ...notes.map((note) => {
@@ -824,7 +837,8 @@ function selectedUsageSummary(rows, spaces, spaceMetrics, datesOverride = select
   const total = combine(rows);
   const dates = datesOverride.length ? datesOverride : selectedDates();
   const spaceCount = spaces.length;
-  const shortageHours = shortageSnapshots(rows, spaceCount).length;
+  const selectedWindows = unique(rows.map((row) => row.timestamp)).length;
+  const shortageRiskWindows = shortageSnapshots(rows, spaceCount).length;
   return {
     usedMinutes: total.usedMinutes,
     availableMinutes: total.availableMinutes,
@@ -833,7 +847,8 @@ function selectedUsageSummary(rows, spaces, spaceMetrics, datesOverride = select
     avgHoursPerSpacePerDay:
       spaceCount && dates.length ? total.usedHours / spaceCount / dates.length : 0,
     medianHoursPerSpacePerDay: median(spaceMetrics.map((space) => space.avgHoursPerDay)),
-    shortageHours
+    shortageRiskWindows,
+    shortageRiskShare: selectedWindows ? shortageRiskWindows / selectedWindows : 0
   };
 }
 
@@ -1003,6 +1018,10 @@ function number(value, places = 1) {
     minimumFractionDigits: places,
     maximumFractionDigits: places
   });
+}
+
+function formatShare(value, places = 0) {
+  return `${number(Number(value || 0) * 100, places)}%`;
 }
 
 function range(start, end) {
