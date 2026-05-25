@@ -1,6 +1,7 @@
 env/
 Amazon API Key.rtf
 data/dashboard-data.json
+data/presence-health-audit/
 data/benchmark-context.json
 *.log
 .DS_Store

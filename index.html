@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Amazon Non-Bookable Space Usage</title>
+    <title>Amazon Sensor-Backed Space Usage</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">Amazon pilot spaces</p>
-        <h1>Non-bookable usage dashboard</h1>
+        <h1>Sensor-backed usage dashboard</h1>
       </div>
       <div class="source-note" id="source-note">Loading data...</div>
     </header>
@@ -96,7 +96,7 @@
             <strong id="kpi-used">-</strong>
           </article>
           <article>
-            <span>Shortage-risk hours</span>
+            <span>Shortage-risk time</span>
             <strong id="kpi-spaces">-</strong>
           </article>
           <article>
@@ -140,7 +140,7 @@
                 <th>Active spaces</th>
                 <th>Avg hrs / space</th>
                 <th>Peak active</th>
-                <th>Shortage hours</th>
+                <th>Shortage-risk time</th>
               </tr>
             </thead>
             <tbody id="daily-table"></tbody>
@@ -164,7 +164,7 @@
                 <th>Avg hrs / space / day</th>
                 <th>Median space hrs / day</th>
                 <th>Peak active</th>
-                <th>Shortage hours</th>
+                <th>Shortage-risk time</th>
               </tr>
             </thead>
             <tbody id="weekly-table"></tbody>
@@ -224,7 +224,7 @@
           <div class="panel">
             <div class="panel-heading">
               <h2>Shortage risk by type</h2>
-              <span>Hours at or above 80% active</span>
+              <span>Share of selected time at or above 80% active</span>
             </div>
             <div id="comparison-shortage-bars" class="bars"></div>
           </div>
@@ -261,7 +261,7 @@
                   <th>Median hrs / space / day</th>
                   <th>Peak active</th>
                   <th>Peak active %</th>
-                  <th>Shortage hours</th>
+                  <th>Shortage-risk time</th>
                   <th>Spaces &gt; 1h/day</th>
                   <th>Underused spaces</th>
                   <th>Busiest weekday/hour</th>

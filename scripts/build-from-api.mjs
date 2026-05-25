@@ -12,20 +12,27 @@ const pilotBuildings = [
   { code: "SJC31", id: "spc_1435649416588427726" }
 ];
 
+const includedPresenceHealthStatuses = new Set(["healthy", "degraded", "offline"]);
+
 const targetLabels = new Map([
-  ["focus", "Focus"],
-  ["huddle", "Huddle"],
-  ["phone", "Phone"],
-  ["phone room", "Phone Room"],
-  ["phone booth", "Phone Booth"],
-  ["lactation", "Lactation/Mothers Room"],
-  ["mothers room", "Lactation/Mothers Room"],
-  ["mother's room", "Lactation/Mothers Room"],
-  ["inter-faith", "Interfaith Room"],
-  ["interfaith", "Interfaith Room"],
-  ["quiet room", "Quiet Room"],
-  ["quiet", "Quiet Room"],
-  ["flex", "Flex"]
+  ["focus", "Focus Rooms"],
+  ["huddle", "Huddle Rooms"],
+  ["phone", "Phone Booths"],
+  ["phone room", "Phone Rooms"],
+  ["phone booth", "Phone Booths"],
+  ["lactation", "Mother's Rooms"],
+  ["mothers room", "Mother's Rooms"],
+  ["mother's room", "Mother's Rooms"],
+  ["inter-faith", "Interfaith Rooms"],
+  ["interfaith", "Interfaith Rooms"],
+  ["quiet room", "Quiet Rooms"],
+  ["quiet", "Quiet Rooms"],
+  ["flex", "Flex Spaces"],
+  ["bookable conference", "Meeting Rooms"],
+  ["non bookable conference", "Meeting Rooms"],
+  ["meet", "Meeting Rooms"],
+  ["workpoints", "Desks"],
+  ["work", "Desks"]
 ]);
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -117,14 +124,23 @@ function labelsFor(space) {
 function targetType(labels, space) {
   for (const label of labels) {
     const normalized = label.trim().toLowerCase();
-    if (normalized === "phone" && space.function === "phone_booth") {
-      return "Phone Booths";
-    }
     if (targetLabels.has(normalized)) return targetLabels.get(normalized);
   }
-  const fallback = String(space.function || "").replaceAll("_", " ").toLowerCase();
-  if (targetLabels.has(fallback)) return targetLabels.get(fallback);
-  return null;
+  const functionName = String(space.function || "").replaceAll("_", " ").toLowerCase();
+  if (targetLabels.has(functionName)) return targetLabels.get(functionName);
+  if (functionName === "phone booth") return "Phone Booths";
+  if (functionName === "meeting room") return "Meeting Rooms";
+  if (functionName === "flex space") return "Flex Spaces";
+  if (functionName === "desk") return "Desks";
+
+  const name = String(space.name || "").toLowerCase();
+  if (name.includes("focus")) return "Focus Rooms";
+  if (name.includes("huddle")) return "Huddle Rooms";
+  if (name.includes("phone")) return "Phone Rooms";
+  if (name.includes("interfaith") || name.includes("inter-faith")) return "Interfaith Rooms";
+  return space.function
+    ? space.function.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : "Uncategorized";
 }
 
 function spaceKind(space) {
@@ -275,6 +291,22 @@ function chunk(items, size) {
   const chunks = [];
   for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
   return chunks;
+}
+
+async function fetchPresenceHealth(token, spaces) {
+  const presenceBySpace = new Map();
+  for (const group of chunk(spaces, 100)) {
+    const result = await apiFetch(token, "/v3/analytics/presence-health", {
+      method: "POST",
+      body: JSON.stringify({
+        space_ids: group.map(({ space }) => space.id)
+      })
+    });
+    for (const [spaceId, datum] of Object.entries(result?.data || result || {})) {
+      presenceBySpace.set(spaceId, datum);
+    }
+  }
+  return presenceBySpace;
 }
 
 function buildDashboardData(spaceCatalog, metricRows, metadata) {
@@ -431,7 +463,7 @@ const sourceBuildings = pilotBuildings.map((building) => ({
   name: byId.get(building.id)?.name || building.id
 }));
 
-const targetSpaces = [...byId.values()]
+const candidateSpaces = [...byId.values()]
   .filter((space) => isDescendantOf(space, buildingIds))
   .map((space) => {
     const labels = labelsFor(space);
@@ -446,22 +478,23 @@ const targetSpaces = [...byId.values()]
       building
     };
   })
-  .filter(({ space, labels, type, floor, building }) => {
-    const hasNonBookable = labels.some(
-      (label) => label.trim().toLowerCase() === "non bookable"
-    );
-    return (
-      building &&
-      floor &&
-      type &&
-      hasNonBookable &&
-      space.function !== "meeting_room" &&
-      spaceKind(space) === "space"
-    );
-  });
+  .filter(
+    ({ space, type, floor, building }) =>
+      building && floor && type && spaceKind(space) === "space"
+  );
+
+const presenceBySpace = await fetchPresenceHealth(token, candidateSpaces);
+const targetSpaces = candidateSpaces
+  .map((candidate) => ({
+    ...candidate,
+    presenceHealth: presenceBySpace.get(candidate.space.id) || null
+  }))
+  .filter(({ presenceHealth }) =>
+    includedPresenceHealthStatuses.has(presenceHealth?.space_health_status)
+  );
 
 if (!targetSpaces.length) {
-  throw new Error("No target non-bookable spaces found under the pilot building IDs.");
+  throw new Error("No sensor-backed target spaces found under the pilot building IDs.");
 }
 
 const metricsBySpace = new Map();
@@ -497,6 +530,8 @@ const spaceCatalog = targetSpaces.map(({ space, labels, type, floor, building })
   buildingName: building.name,
   function: space.function || "",
   countingMode: space.counting_mode || "",
+  presenceHealthStatus:
+    presenceBySpace.get(space.id)?.space_health_status || "",
   type,
   labels
 }));
@@ -527,7 +562,7 @@ for (const [spaceId, buckets] of metricsBySpace) {
 
 const includedDates = metricRows.map((row) => row.date).sort();
 const dashboardData = buildDashboardData(spaceCatalog, metricRows, {
-  source: "Density API /v3/spaces + /v3/analytics/time-used",
+  source: "Density API /v3/spaces + /v3/analytics/presence-health + /v3/analytics/time-used",
   generatedAt: new Date().toISOString(),
   requestedRange,
   requestedWindows: weeklyWindows,
@@ -545,7 +580,11 @@ const dashboardData = buildDashboardData(spaceCatalog, metricRows, {
   intervalMinutes: 60,
   apiAudit: {
     spacesReturned: byId.size,
+    candidateSpaces: candidateSpaces.length,
+    presenceHealthResponses: presenceBySpace.size,
+    includedPresenceHealthStatuses: [...includedPresenceHealthStatuses],
     targetSpaces: targetSpaces.length,
+    excludedWithoutIncludedPresenceHealth: candidateSpaces.length - targetSpaces.length,
     metricSpaceResponses: metricsBySpace.size,
     bucketsWithoutTimestamp
   },
