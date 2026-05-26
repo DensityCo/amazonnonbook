@@ -60,6 +60,7 @@ const els = {
 };
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const fullDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const businessDays = [1, 2, 3, 4, 5];
 const colors = ["#3367c2", "#2bb8a8", "#d5965f", "#8c5be8", "#159fd3", "#b4453f"];
 const shortageThreshold = 0.8;
@@ -435,11 +436,17 @@ function renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage) {
     `${formatHour(state.filters.startHour)}-${formatHour(state.filters.endHour)}`
   ];
   const meaningful = spaceMetrics.filter((space) => space.avgHoursPerDay > 1).length;
-  const unusedAtPeak = Math.max(spaces.length - peak.active, 0);
+  const shortageRisk = shortageRiskInsight(rows, spaces.length, peak);
+  const lowerType = type.toLowerCase();
 
   els.insightScope.textContent = scope.join(" · ");
-  els.insightTitle.innerHTML = `${escapeHtml(selectedLocationLabel())} never needed more than <span>${peak.active}</span> ${escapeHtml(type.toLowerCase())} at once from ${escapeHtml(state.filters.startDate)} to ${escapeHtml(state.filters.endDate)}.`;
-  els.insightCopy.textContent = `${unusedAtPeak} of ${spaces.length} ${type.toLowerCase()} were still available at peak demand. Each space averaged ${number(usage.avgHoursPerSpacePerDay)} hours of use per selected day; median space use was ${number(usage.medianHoursPerSpacePerDay)} hours/day. Usage was heaviest around ${mostUsedHourLabel(rows)}, and ${meaningful} spaces averaged more than 1 hour/day.`;
+  if (shortageRisk.hasRisk) {
+    els.insightTitle.innerHTML = `${escapeHtml(sentenceCase(lowerType))} crossed the shortage-risk threshold during <span>${formatShare(usage.shortageRiskShare)}</span> of selected hours. At the busiest time, ${peak.active} of ${spaces.length} ${escapeHtml(lowerType)} were in use.`;
+    els.insightCopy.textContent = `The ${shortageRisk.thresholdLabel} simultaneous-use benchmark was exceeded during ${formatCount(usage.shortageRiskWindows, "selected hour")}, most often around ${shortageRisk.windowLabel}. Peak saturation was ${formatInsightTime(peak.day, peak.hour)}, when ${formatShare(shortageRisk.peakShare)} were occupied. Each space averaged ${number(usage.avgHoursPerSpacePerDay)} hours of use per selected day; ${meaningful} spaces averaged more than 1 hour/day.`;
+  } else {
+    els.insightTitle.innerHTML = `${escapeHtml(sentenceCase(lowerType))} came close to capacity but never crossed the shortage-risk threshold. At the busiest time, <span>${peak.active} of ${spaces.length}</span> ${escapeHtml(lowerType)} were in use.`;
+    els.insightCopy.textContent = `At no point were ${shortageRisk.thresholdLabel} of ${lowerType} in use simultaneously. The highest saturation was ${shortageRisk.windowLabel}, when ${formatShare(shortageRisk.peakShare)} were occupied. Each space averaged ${number(usage.avgHoursPerSpacePerDay)} hours of use per selected day; median space use was ${number(usage.medianHoursPerSpacePerDay)} hours/day.`;
+  }
   els.spaceGrid.replaceChildren(
     ...spaces.map((space) => {
       const node = document.createElement("button");
@@ -455,6 +462,39 @@ function renderInsight(rows, spaces, spaceMetrics, peak, typicalActive, usage) {
       return node;
     })
   );
+}
+
+function shortageRiskInsight(rows, totalSpaces, peak) {
+  const snapshots = shortageSnapshots(rows, totalSpaces);
+  return {
+    hasRisk: snapshots.length > 0,
+    thresholdLabel: formatShare(shortageThreshold),
+    windowLabel: snapshots.length ? recurringSnapshotLabel(snapshots) : peakPressureLabel(peak),
+    peakShare: totalSpaces ? peak.active / totalSpaces : 0
+  };
+}
+
+function recurringSnapshotLabel(snapshots) {
+  const buckets = [...groupBy(snapshots, (snapshot) => `${snapshot.day}-${snapshot.hour}`)].map(([id, group]) => {
+    const [day, hour] = id.split("-").map(Number);
+    return {
+      day,
+      hour,
+      count: group.length,
+      avgShare: sum(group, "share") / group.length
+    };
+  });
+  const sorted = buckets.sort((a, b) => b.count - a.count || b.avgShare - a.avgShare || a.day - b.day || a.hour - b.hour);
+  const topCount = sorted[0]?.count || 0;
+  const topBuckets = sorted.filter((bucket) => bucket.count === topCount);
+  const labels = topBuckets.slice(0, 2).map((bucket) => formatInsightTime(bucket.day, bucket.hour));
+  if (topBuckets.length > 2) labels.push(`${formatCount(topBuckets.length - 2, "other recurring time")}`);
+  return listLabels(labels);
+}
+
+function peakPressureLabel(peak) {
+  if (!peak.active) return "no selected hour";
+  return formatInsightTime(peak.day, peak.hour);
 }
 
 function renderHeatmap(rows, totalSpaces) {
@@ -887,6 +927,7 @@ function peakSnapshot(rows) {
       timestamp,
       date: first?.date || "",
       hour: first?.hour || 0,
+      day: first?.day,
       dayLabel: first ? dayNames[first.day] : "",
       active: active.size,
       spaceIds: active
@@ -897,6 +938,7 @@ function peakSnapshot(rows) {
     spaceIds: new Set(),
     date: "",
     hour: 0,
+    day: null,
     dayLabel: ""
   };
 }
@@ -1022,6 +1064,34 @@ function number(value, places = 1) {
 
 function formatShare(value, places = 0) {
   return `${number(Number(value || 0) * 100, places)}%`;
+}
+
+function formatCount(value, singular) {
+  const count = Number(value || 0);
+  return `${count.toLocaleString()} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function listLabels(labels) {
+  const clean = labels.filter(Boolean);
+  if (!clean.length) return "-";
+  if (clean.length === 1) return clean[0];
+  const separator = clean.length === 2 ? " " : ", ";
+  return `${clean.slice(0, -1).join(", ")}${separator}and ${clean.at(-1)}`;
+}
+
+function sentenceCase(value) {
+  const text = String(value || "");
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "";
+}
+
+function formatInsightTime(day, hour) {
+  return `${fullDayNames[day] || dayNames[day] || ""} at ${formatHumanHour(hour)}`.trim();
+}
+
+function formatHumanHour(hour) {
+  if (hour === 0) return "midnight";
+  if (hour === 12) return "noon";
+  return formatHour(hour);
 }
 
 function range(start, end) {
