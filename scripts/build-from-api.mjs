@@ -9,6 +9,7 @@ const pilotBuildings = [
   { code: "SEA25", id: "spc_1240354454767665670" },
   { code: "SEA37", id: "spc_1372296005617189318" },
   { code: "SEA44", id: "spc_1092856114543854152" },
+  { code: "SEA54", id: "spc_1378034448255156721" },
   { code: "SJC31", id: "spc_1435649416588427726" }
 ];
 

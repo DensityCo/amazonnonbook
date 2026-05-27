@@ -56,16 +56,16 @@ The dashboard will show that context at the top of the Space Type Comparison tab
 
 ## Current Data Coverage
 
-`data/dashboard-data.json` is generated locally from the Density API and is intentionally not committed because it contains customer workplace usage data. With a valid token, `npm run build:api` generates data covering SEA25, SEA37, SEA44, and SJC31 from Monday, April 20 through Friday, May 15, 2026.
+`data/dashboard-data.json` is generated locally from the Density API and is intentionally not committed because it contains customer workplace usage data. With a valid token, `npm run build:api` generates data covering SEA25, SEA37, SEA44, SEA54, and SJC31 from Monday, April 20 through Friday, May 15, 2026.
 
 Latest local generated audit:
 
-- 4 buildings
-- 29 floors
-- 289 spaces with confirmed presence sensors
-- 46,240 hourly metric rows
-- 7,734.53 used hours
-- 16.7% overall utilization
+- 5 buildings
+- 36 floors
+- 1,860 spaces with confirmed presence sensors
+- 297,600 hourly metric rows
+- 80,407.63 used hours
+- 27.0% overall utilization
 
 ## Scope Rules
 
