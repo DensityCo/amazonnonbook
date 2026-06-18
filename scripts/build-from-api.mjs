@@ -5,13 +5,6 @@ const tokenPath = process.env.DENSITY_API_TOKEN_FILE || "env/density-api-token.t
 const outputPath = process.argv[2] || path.join("data", "dashboard-data.json");
 const apiBase = process.env.DENSITY_API_BASE || "https://api.density.io";
 
-const pilotBuildings = [
-  { code: "SEA25", id: "spc_1240354454767665670" },
-  { code: "SEA37", id: "spc_1372296005617189318" },
-  { code: "SEA44", id: "spc_1092856114543854152" },
-  { code: "SJC31", id: "spc_1435649416588427726" }
-];
-
 const includedPresenceHealthStatuses = new Set(["healthy", "degraded", "offline"]);
 
 const targetLabels = new Map([
@@ -35,7 +28,6 @@ const targetLabels = new Map([
   ["work", "Desks"]
 ]);
 
-const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const requestedRange = {
   start: "2026-04-20",
   end: "2026-05-15",
@@ -113,10 +105,6 @@ function flattenSpaces(spaces) {
   return byId;
 }
 
-function isDescendantOf(space, buildingIds) {
-  return buildingIds.has(space.id) || space.ancestorIds?.some((id) => buildingIds.has(id));
-}
-
 function labelsFor(space) {
   return (space.labels || []).map((label) => label.name || label.LABEL_NAME || "").filter(Boolean);
 }
@@ -126,6 +114,12 @@ function targetType(labels, space) {
     const normalized = label.trim().toLowerCase();
     if (targetLabels.has(normalized)) return targetLabels.get(normalized);
   }
+  const descriptiveLabel = labels.find((label) => {
+    const normalized = label.trim().toLowerCase();
+    return normalized !== "non bookable" && normalized !== "non-bookable" && normalized !== "bookable";
+  });
+  if (descriptiveLabel) return titleType(descriptiveLabel);
+
   const functionName = String(space.function || "").replaceAll("_", " ").toLowerCase();
   if (targetLabels.has(functionName)) return targetLabels.get(functionName);
   if (functionName === "phone booth") return "Phone Booths";
@@ -143,6 +137,21 @@ function targetType(labels, space) {
     : "Uncategorized";
 }
 
+function titleType(label) {
+  return String(label)
+    .trim()
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function hasNonBookableLabel(labels) {
+  return labels.some((label) => {
+    const normalized = label.trim().toLowerCase();
+    return normalized === "non bookable" || normalized === "non-bookable";
+  });
+}
+
 function spaceKind(space) {
   return String(space.space_type || space.type || "").toLowerCase();
 }
@@ -156,135 +165,13 @@ function floorFor(space, byId) {
   return null;
 }
 
-function buildingFor(space, byId, buildingIds) {
-  if (buildingIds.has(space.id)) return space;
+function buildingFor(space, byId) {
+  if (spaceKind(space) === "building") return space;
   for (const id of [...(space.ancestorIds || [])].reverse()) {
-    if (buildingIds.has(id)) return byId.get(id);
+    const candidate = byId.get(id);
+    if (candidate && spaceKind(candidate) === "building") return candidate;
   }
   return null;
-}
-
-function metricBuckets(datum) {
-  if (!datum) return [];
-  if (Array.isArray(datum)) return datum;
-  for (const key of ["data", "results", "values", "buckets", "metrics", "time_used"]) {
-    if (Array.isArray(datum[key])) return datum[key];
-  }
-  const timestampEntries = Object.entries(datum).filter(
-    ([entryKey, value]) =>
-      /^\d{4}-\d{2}-\d{2}T/.test(entryKey) &&
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-  if (timestampEntries.length) {
-    return timestampEntries.map(([timestamp, value]) => ({ ...value, timestamp }));
-  }
-  return [datum];
-}
-
-function bucketTimestamp(bucket) {
-  return (
-    bucket.start_date ||
-    bucket.start_time ||
-    bucket.timestamp ||
-    bucket.local_date_time ||
-    bucket.date_time ||
-    bucket.datetime ||
-    bucket.date ||
-    null
-  );
-}
-
-function bucketUsedMinutes(bucket) {
-  const rawMs =
-    bucket.time_used_raw ??
-    bucket.time_used_ms ??
-    bucket.timeUsedRaw ??
-    bucket.raw;
-  if (rawMs != null) return Number(rawMs) / 60000;
-
-  const seconds = bucket.time_used_seconds ?? bucket.timeUsedSeconds;
-  if (seconds != null) return Number(seconds) / 60;
-
-  const minutes = bucket.time_used_minutes ?? bucket.timeUsedMinutes;
-  if (minutes != null) return Number(minutes);
-
-  const pct = bucket.time_used_percentage ?? bucket.timeUsedPercentage;
-  if (pct != null) return Number(pct) * 60;
-
-  return 0;
-}
-
-function bucketAvailableMinutes(bucket) {
-  const durationMs = bucket.duration_ms ?? bucket.bucket_duration_ms;
-  if (durationMs != null) return Number(durationMs) / 60000;
-  const durationMinutes = bucket.duration_minutes ?? bucket.bucket_duration_minutes;
-  if (durationMinutes != null) return Number(durationMinutes);
-  return 60;
-}
-
-function mondayOf(date) {
-  const result = new Date(`${date}T00:00:00`);
-  const day = result.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  result.setDate(result.getDate() + diff);
-  return result.toISOString().slice(0, 10);
-}
-
-function localDateParts(timestamp) {
-  const dateTime = String(timestamp).replace("Z", "");
-  const [date, time = "00:00:00"] = dateTime.split("T");
-  return { date, hour: Number(time.slice(0, 2)) };
-}
-
-function key(parts) {
-  return parts.join("||");
-}
-
-function emptyMetric(extra = {}) {
-  return {
-    usedMinutes: 0,
-    availableMinutes: 0,
-    avgOccupancyWeightedMinutes: 0,
-    entrances: 0,
-    exits: 0,
-    observations: 0,
-    ...extra
-  };
-}
-
-function addMetric(map, id, extra, row) {
-  if (!map.has(id)) map.set(id, emptyMetric(extra));
-  const metric = map.get(id);
-  metric.usedMinutes += row.usedMinutes;
-  metric.availableMinutes += row.availableMinutes;
-  metric.observations += 1;
-}
-
-function round(value, places) {
-  const factor = 10 ** places;
-  return Math.round(value * factor) / factor;
-}
-
-function finalizeMetric(metric) {
-  const usedHours = metric.usedMinutes / 60;
-  const availableHours = metric.availableMinutes / 60;
-  return {
-    ...metric,
-    usedMinutes: round(metric.usedMinutes, 1),
-    availableMinutes: round(metric.availableMinutes, 1),
-    usedHours: round(usedHours, 2),
-    availableHours: round(availableHours, 2),
-    utilization: metric.availableMinutes
-      ? round((metric.usedMinutes / metric.availableMinutes) * 100, 1)
-      : 0,
-    avgOccupancyWhenUsed: 0
-  };
-}
-
-function values(map) {
-  return [...map.values()].map(finalizeMetric);
 }
 
 function chunk(items, size) {
@@ -309,102 +196,30 @@ async function fetchPresenceHealth(token, spaces) {
   return presenceBySpace;
 }
 
-function buildDashboardData(spaceCatalog, metricRows, metadata) {
-  const overall = emptyMetric();
-  const byType = new Map();
-  const byFloorTypeWeek = new Map();
-  const byFloor = new Map();
-  const bySpace = new Map();
-  const byDate = new Map();
-  const byDayHour = new Map();
+function businessDates(start, end) {
+  const dates = [];
+  const cursor = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (cursor <= last) {
+    const day = cursor.getDay();
+    if (day >= 1 && day <= 5) dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function buildDashboardData(spaceCatalog, dates, metadata) {
   const buildings = new Map();
   const floors = new Map();
 
-  for (const row of metricRows) {
-    const dateObject = new Date(`${row.date}T00:00:00`);
-    const day = dateObject.getDay();
-    const weekStart = mondayOf(row.date);
-
-    buildings.set(row.buildingId, row.buildingName);
-    floors.set(row.floorId, {
-      floorId: row.floorId,
-      floorName: row.floorName,
-      buildingId: row.buildingId,
-      buildingName: row.buildingName
+  for (const space of spaceCatalog) {
+    buildings.set(space.buildingId, space.buildingName);
+    floors.set(space.floorId, {
+      floorId: space.floorId,
+      floorName: space.floorName,
+      buildingId: space.buildingId,
+      buildingName: space.buildingName
     });
-
-    addMetric(new Map([["overall", overall]]), "overall", {}, row);
-    addMetric(byType, row.type, { type: row.type }, row);
-    addMetric(
-      byFloorTypeWeek,
-      key([row.buildingId, row.floorId, row.type, weekStart]),
-      {
-        buildingId: row.buildingId,
-        buildingName: row.buildingName,
-        floorId: row.floorId,
-        floorName: row.floorName,
-        type: row.type,
-        weekStart
-      },
-      row
-    );
-    addMetric(
-      byFloor,
-      row.floorId,
-      {
-        buildingId: row.buildingId,
-        buildingName: row.buildingName,
-        floorId: row.floorId,
-        floorName: row.floorName
-      },
-      row
-    );
-    addMetric(
-      bySpace,
-      row.spaceId,
-      {
-        spaceId: row.spaceId,
-        spaceName: row.spaceName,
-        floorId: row.floorId,
-        floorName: row.floorName,
-        buildingId: row.buildingId,
-        buildingName: row.buildingName,
-        function: row.function,
-        countingMode: row.countingMode,
-        type: row.type
-      },
-      row
-    );
-    addMetric(
-      byDate,
-      key([row.buildingId, row.floorId, row.type, row.date]),
-      {
-        buildingId: row.buildingId,
-        buildingName: row.buildingName,
-        floorId: row.floorId,
-        floorName: row.floorName,
-        type: row.type,
-        date: row.date,
-        dayOfWeek: dayNames[day],
-        dayIndex: day
-      },
-      row
-    );
-    addMetric(
-      byDayHour,
-      key([row.buildingId, row.floorId, row.type, dayNames[day], row.hour]),
-      {
-        buildingId: row.buildingId,
-        buildingName: row.buildingName,
-        floorId: row.floorId,
-        floorName: row.floorName,
-        type: row.type,
-        dayOfWeek: dayNames[day],
-        dayIndex: day,
-        hour: row.hour
-      },
-      row
-    );
   }
 
   return {
@@ -416,38 +231,11 @@ function buildDashboardData(spaceCatalog, metricRows, metadata) {
       })),
       floors: [...floors.values()],
       types: [...new Set(spaceCatalog.map((space) => space.type))].sort(),
-      spaces: spaceCatalog
+      spaces: spaceCatalog,
+      dates
     },
     metrics: {
-      intervals: metricRows.map((row) => ({
-        spaceId: row.spaceId,
-        buildingId: row.buildingId,
-        floorId: row.floorId,
-        type: row.type,
-        date: row.date,
-        hour: row.hour,
-        usedMinutes: round(row.usedMinutes, 2),
-        availableMinutes: round(row.availableMinutes, 2)
-      })),
-      overall: finalizeMetric(overall),
-      byType: values(byType).sort((a, b) => b.usedMinutes - a.usedMinutes),
-      byFloor: values(byFloor).sort((a, b) => a.floorName.localeCompare(b.floorName)),
-      byFloorTypeWeek: values(byFloorTypeWeek).sort(
-        (a, b) =>
-          a.weekStart.localeCompare(b.weekStart) ||
-          a.floorName.localeCompare(b.floorName) ||
-          a.type.localeCompare(b.type)
-      ),
-      bySpace: values(bySpace).sort((a, b) => b.usedMinutes - a.usedMinutes),
-      byDate: values(byDate).sort(
-        (a, b) =>
-          a.date.localeCompare(b.date) ||
-          a.floorName.localeCompare(b.floorName) ||
-          a.type.localeCompare(b.type)
-      ),
-      byDayHour: values(byDayHour).sort(
-        (a, b) => a.dayIndex - b.dayIndex || a.hour - b.hour
-      )
+      intervals: []
     }
   };
 }
@@ -457,19 +245,13 @@ await apiFetch(token, "/v3/hello-world", { headers: { "Content-Type": "text/plai
 
 const allSpaces = await apiFetch(token, "/v3/spaces");
 const byId = flattenSpaces(allSpaces);
-const buildingIds = new Set(pilotBuildings.map((building) => building.id));
-const sourceBuildings = pilotBuildings.map((building) => ({
-  ...building,
-  name: byId.get(building.id)?.name || building.id
-}));
 
 const candidateSpaces = [...byId.values()]
-  .filter((space) => isDescendantOf(space, buildingIds))
   .map((space) => {
     const labels = labelsFor(space);
     const type = targetType(labels, space);
     const floor = floorFor(space, byId);
-    const building = buildingFor(space, byId, buildingIds);
+    const building = buildingFor(space, byId);
     return {
       space,
       labels,
@@ -479,8 +261,8 @@ const candidateSpaces = [...byId.values()]
     };
   })
   .filter(
-    ({ space, type, floor, building }) =>
-      building && floor && type && spaceKind(space) === "space"
+    ({ space, labels, type, floor, building }) =>
+      building && floor && type && hasNonBookableLabel(labels) && spaceKind(space) === "space"
   );
 
 const presenceBySpace = await fetchPresenceHealth(token, candidateSpaces);
@@ -494,32 +276,16 @@ const targetSpaces = candidateSpaces
   );
 
 if (!targetSpaces.length) {
-  throw new Error("No sensor-backed target spaces found under the pilot building IDs.");
+  throw new Error("No sensor-backed spaces with a Non Bookable / Non-Bookable label were found.");
 }
 
-const metricsBySpace = new Map();
-for (const window of weeklyWindows) {
-  for (const ids of chunk(targetSpaces.map(({ space }) => space.id), 100)) {
-    const result = await apiFetch(token, "/v3/analytics/time-used", {
-      method: "POST",
-      body: JSON.stringify({
-        start_date: `${window.start}T00:00:00`,
-        end_date: `${window.end}T23:59:59`,
-        operating_hours: {
-          days: [1, 2, 3, 4, 5],
-          start_hour: 9,
-          end_hour: 17
-        },
-        space_ids: ids,
-        time_resolution: "hour"
-      })
-    });
-    for (const [spaceId, datum] of Object.entries(result || {})) {
-      if (!metricsBySpace.has(spaceId)) metricsBySpace.set(spaceId, []);
-      metricsBySpace.get(spaceId).push(...metricBuckets(datum));
-    }
-  }
-}
+const sourceBuildings = [...new Map(targetSpaces.map(({ building }) => [building.id, building])).values()]
+  .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+  .map((building) => ({
+    code: String(building.name || building.id).split(" - ")[0],
+    id: building.id,
+    name: building.name || building.id
+  }));
 
 const spaceCatalog = targetSpaces.map(({ space, labels, type, floor, building }) => ({
   spaceId: space.id,
@@ -536,67 +302,38 @@ const spaceCatalog = targetSpaces.map(({ space, labels, type, floor, building })
   labels
 }));
 
-const catalogById = new Map(spaceCatalog.map((space) => [space.spaceId, space]));
-const metricRows = [];
-let bucketsWithoutTimestamp = 0;
-
-for (const [spaceId, buckets] of metricsBySpace) {
-  const catalog = catalogById.get(spaceId);
-  if (!catalog) continue;
-  for (const bucket of buckets) {
-    const timestamp = bucketTimestamp(bucket);
-    if (!timestamp) {
-      bucketsWithoutTimestamp += 1;
-      continue;
-    }
-    const { date, hour } = localDateParts(timestamp);
-    metricRows.push({
-      ...catalog,
-      date,
-      hour,
-      usedMinutes: bucketUsedMinutes(bucket),
-      availableMinutes: bucketAvailableMinutes(bucket)
-    });
-  }
-}
-
-const includedDates = metricRows.map((row) => row.date).sort();
-const dashboardData = buildDashboardData(spaceCatalog, metricRows, {
-  source: "Density API /v3/spaces + /v3/analytics/presence-health + /v3/analytics/time-used",
+const dates = businessDates(requestedRange.start, requestedRange.end);
+const dashboardData = buildDashboardData(spaceCatalog, dates, {
+  source: "Density API /v3/spaces + /v3/analytics/presence-health + /v3/analytics/sessions/raw",
   generatedAt: new Date().toISOString(),
   requestedRange,
   requestedWindows: weeklyWindows,
   includedRange: {
-    start: includedDates[0] || null,
-    end: includedDates[includedDates.length - 1] || null
+    start: dates[0] || null,
+    end: dates[dates.length - 1] || null
   },
   targetBuildings: sourceBuildings,
-  rowsRead: metricRows.length,
-  rowsInScope: metricRows.length,
+  rowsRead: 0,
+  rowsInScope: 0,
   rowsOutOfBusinessHours: 0,
   rowsMeetingRoom: 0,
   rowsWithoutNonBookableLabel: 0,
   rowsWithoutTargetTypeLabel: 0,
-  intervalMinutes: 60,
+  intervalMinutes: 5,
   apiAudit: {
     spacesReturned: byId.size,
     candidateSpaces: candidateSpaces.length,
     presenceHealthResponses: presenceBySpace.size,
     includedPresenceHealthStatuses: [...includedPresenceHealthStatuses],
     targetSpaces: targetSpaces.length,
-    excludedWithoutIncludedPresenceHealth: candidateSpaces.length - targetSpaces.length,
-    metricSpaceResponses: metricsBySpace.size,
-    bucketsWithoutTimestamp
+    excludedWithoutIncludedPresenceHealth: candidateSpaces.length - targetSpaces.length
   },
-  warnings:
-    bucketsWithoutTimestamp > 0
-      ? [`Skipped ${bucketsWithoutTimestamp} time-used buckets without timestamps.`]
-      : []
+  warnings: []
 });
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(dashboardData, null, 2)}\n`);
 
 console.log(
-  `Wrote ${outputPath}: ${metricRows.length.toLocaleString()} metric rows, ${spaceCatalog.length} spaces from Density API.`
+  `Wrote ${outputPath}: ${spaceCatalog.length} non-bookable spaces from Density API. Run build:concurrency to add simultaneous-use rows.`
 );
