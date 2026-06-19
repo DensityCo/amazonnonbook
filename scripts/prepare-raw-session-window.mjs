@@ -5,18 +5,12 @@ const inputPath = process.argv[2] || path.join("data", "dashboard-data.json");
 const outputPath = process.argv[3] || inputPath;
 
 const requestedRange = {
-  start: "2026-04-20",
-  end: "2026-05-22",
+  start: process.env.AMAZON_NONBOOKABLE_START_DATE || "2026-04-20",
+  end: process.env.AMAZON_NONBOOKABLE_END_DATE || "2026-06-17",
   businessHours: "Monday-Friday 09:00-17:00 local"
 };
 
-const requestedWindows = [
-  { start: "2026-04-20", end: "2026-04-24" },
-  { start: "2026-04-27", end: "2026-05-01" },
-  { start: "2026-05-04", end: "2026-05-08" },
-  { start: "2026-05-11", end: "2026-05-15" },
-  { start: "2026-05-18", end: "2026-05-22" }
-];
+const requestedWindows = weeklyWindowsForRange(requestedRange.start, requestedRange.end);
 
 function businessDates(start, end) {
   const dates = [];
@@ -28,6 +22,30 @@ function businessDates(start, end) {
     cursor.setDate(cursor.getDate() + 1);
   }
   return dates;
+}
+
+function weeklyWindowsForRange(start, end) {
+  const windows = [];
+  const cursor = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (cursor <= last) {
+    const day = cursor.getDay();
+    if (day === 0 || day === 6) {
+      cursor.setDate(cursor.getDate() + 1);
+      continue;
+    }
+    const windowStart = cursor.toISOString().slice(0, 10);
+    const windowEndDate = new Date(cursor);
+    windowEndDate.setDate(cursor.getDate() + (5 - day));
+    if (windowEndDate > last) windowEndDate.setTime(last.getTime());
+    windows.push({
+      start: windowStart,
+      end: windowEndDate.toISOString().slice(0, 10)
+    });
+    cursor.setTime(windowEndDate.getTime());
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return windows;
 }
 
 const data = JSON.parse(fs.readFileSync(inputPath, "utf8"));

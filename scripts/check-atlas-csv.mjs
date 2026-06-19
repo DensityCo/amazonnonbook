@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 const dataPath = process.argv[2] || "data/dashboard-data.json";
 const csvPath = process.argv[3];
+const thresholdHours = Number(process.argv[4] || 1);
 
 if (!csvPath) {
   throw new Error("Usage: node scripts/check-atlas-csv.mjs data/dashboard-data.json /path/to/spaces.csv");
@@ -73,6 +74,7 @@ const dateSet = new Set(csvDates);
 const buildingNames = [...new Set(csvRows.map((row) => row.BUILDING_NAME).filter(Boolean))].sort();
 const matchedSpaces = new Set();
 const csvByTimestamp = new Map();
+const csvBySpaceDate = new Map();
 let matchedRows = 0;
 let businessRows = 0;
 let csvPositiveRows = 0;
@@ -90,6 +92,7 @@ for (const row of csvRows) {
   if (!dateSet.has(date) || day < 1 || day > 5 || hour < 9 || hour >= 17) continue;
   businessRows += 1;
   const active = Number(row.TIME_USED_MINUTES || 0) / 15;
+  addNumber(csvBySpaceDate, `${space.spaceId}|${date}`, Number(row.TIME_USED_MINUTES || 0));
   if (active > 0) csvPositiveRows += 1;
   for (let offset = 0; offset < 3; offset += 1) {
     addNumber(csvByTimestamp, `${date}|${hour}|${Math.floor(minute / 5) + offset}`, active);
@@ -108,6 +111,7 @@ const relevantFloorIndexes = new Set(
 const relevantTypes = new Set([...matchedSpaces].map((spaceId) => spaceById.get(spaceId)?.type).filter(Boolean));
 const relevantTypeIndexes = new Set(types.map((type, index) => (relevantTypes.has(type) ? index : null)).filter((index) => index != null));
 const rawByTimestamp = new Map();
+const rawBySpaceDate = new Map();
 
 for (const row of concurrency.byFloorTypeHour || []) {
   const [floorIndex, typeIndex, dateIndex, hour, slot, active] = row;
@@ -117,6 +121,14 @@ for (const row of concurrency.byFloorTypeHour || []) {
   if (!relevantTypeIndexes.has(typeIndex)) continue;
   addNumber(rawByTimestamp, `${date}|${hour}|${slot}`, active);
 }
+for (const row of concurrency.bySpaceHour || []) {
+  const [spaceIndex, dateIndex, hour, minutes] = row;
+  const space = spaces[spaceIndex];
+  const date = dates[dateIndex];
+  if (!space || !dateSet.has(date) || !matchedSpaces.has(space.spaceId)) continue;
+  if (hour < 9 || hour >= 17) continue;
+  addNumber(rawBySpaceDate, `${space.spaceId}|${date}`, minutes);
+}
 
 const selectedWindows = csvDates.length * 8 * 12;
 const selectedSpaces = matchedSpaces.size;
@@ -124,6 +136,27 @@ const csvTotal = [...csvByTimestamp.values()].reduce((total, value) => total + v
 const rawTotal = [...rawByTimestamp.values()].reduce((total, value) => total + value, 0);
 const csvPeak = Math.max(0, ...csvByTimestamp.values());
 const rawPeak = Math.max(0, ...rawByTimestamp.values());
+const thresholdMinutes = thresholdHours * 60;
+
+function dailyMetrics(bySpaceDate) {
+  const daily = csvDates.map((date) => {
+    const minutes = [...matchedSpaces].map((spaceId) => bySpaceDate.get(`${spaceId}|${date}`) || 0);
+    const thresholdCount = minutes.filter((value) => value >= thresholdMinutes).length;
+    const totalHours = minutes.reduce((total, value) => total + value / 60, 0);
+    return { date, thresholdCount, totalHours };
+  });
+  return {
+    averageThresholdSpaces: round(daily.reduce((total, row) => total + row.thresholdCount, 0) / Math.max(daily.length, 1)),
+    averageHoursPerSpacePerDay: round(
+      daily.reduce((total, row) => total + row.totalHours, 0) / Math.max(daily.length, 1) / Math.max(matchedSpaces.size, 1)
+    ),
+    peakThresholdSpaces: Math.max(0, ...daily.map((row) => row.thresholdCount)),
+    daily
+  };
+}
+
+const csvDaily = dailyMetrics(csvBySpaceDate);
+const rawDaily = dailyMetrics(rawBySpaceDate);
 
 console.log(
   JSON.stringify(
@@ -137,21 +170,27 @@ console.log(
       csvPositiveRows,
       selectedSpaces,
       selectedWindows,
+      thresholdHours,
       csv: {
         avgActive: round(csvTotal / selectedWindows),
         avgSharePct: round((csvTotal / selectedWindows / selectedSpaces) * 100),
         peakActive: round(csvPeak),
-        peakSharePct: round((csvPeak / selectedSpaces) * 100)
+        peakSharePct: round((csvPeak / selectedSpaces) * 100),
+        daily: csvDaily
       },
       rawSessionDashboard: {
         avgActive: round(rawTotal / selectedWindows),
         avgSharePct: round((rawTotal / selectedWindows / selectedSpaces) * 100),
         peakActive: round(rawPeak),
-        peakSharePct: round((rawPeak / selectedSpaces) * 100)
+        peakSharePct: round((rawPeak / selectedSpaces) * 100),
+        daily: rawDaily
       },
       difference: {
         avgSharePct: round((rawTotal / selectedWindows / selectedSpaces - csvTotal / selectedWindows / selectedSpaces) * 100),
-        peakSharePct: round((rawPeak / selectedSpaces - csvPeak / selectedSpaces) * 100)
+        peakSharePct: round((rawPeak / selectedSpaces - csvPeak / selectedSpaces) * 100),
+        averageThresholdSpaces: round(rawDaily.averageThresholdSpaces - csvDaily.averageThresholdSpaces),
+        averageHoursPerSpacePerDay: round(rawDaily.averageHoursPerSpacePerDay - csvDaily.averageHoursPerSpacePerDay),
+        peakThresholdSpaces: round(rawDaily.peakThresholdSpaces - csvDaily.peakThresholdSpaces)
       }
     },
     null,
