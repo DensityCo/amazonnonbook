@@ -159,6 +159,38 @@ input {
   padding: 0 10px;
 }
 
+input[type="range"] {
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  accent-color: var(--blue);
+}
+
+.threshold-label {
+  align-content: start;
+  grid-column: 1 / -1;
+}
+
+.threshold-control {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.threshold-control span {
+  min-width: 52px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: right;
+}
+
 .range-pair {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -188,6 +220,34 @@ input {
   box-shadow: var(--shadow);
 }
 
+.dashboard-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.dashboard-tabs button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dashboard-tabs button.active {
+  background: var(--blue);
+  color: #fff;
+}
+
 .empty-state {
   margin: -4px 0 16px;
   color: var(--muted);
@@ -201,7 +261,7 @@ input {
 
 .insight {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
   gap: 24px;
   margin-bottom: 16px;
   padding: 28px 30px;
@@ -235,14 +295,15 @@ input {
 
 .insight-kpis {
   display: grid;
-  grid-template-columns: minmax(180px, 340px);
+  grid-template-columns: minmax(180px, 240px);
   gap: 12px;
   align-content: center;
   justify-content: end;
+  text-align: right;
 }
 
 .insight-kpis article {
-  min-height: 128px;
+  min-height: 112px;
   padding: 16px;
   border: 1px solid rgb(247 239 227 / 0.14);
   border-radius: 8px;
@@ -258,8 +319,8 @@ input {
 
 .insight-kpis strong {
   display: block;
-  margin: 12px 0 8px;
-  font-size: 34px;
+  margin: 10px 0 6px;
+  font-size: 32px;
   line-height: 1;
 }
 
@@ -664,6 +725,33 @@ input {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
+  background: #fff;
+}
+
+.expand-button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.expand-button.active {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #fff;
+}
+
+.detail-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px 0;
+  border-top: 1px solid var(--line);
   background: #fff;
 }
 

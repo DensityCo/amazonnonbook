@@ -25,15 +25,20 @@ Then run:
 
 ```sh
 npm run build:api
+npm run split:data
 ```
 
 The build flow:
 
 - Reads `/v3/spaces`.
+- Scopes to `SEA25`, `SEA37`, `SEA44`, `SJC31`, and `JFK27` by default. Override with `AMAZON_NONBOOKABLE_BUILDINGS=SEA25,JFK27 npm run build:api`.
 - Keeps spaces with a `Non Bookable` or `Non-Bookable` label.
 - Uses the companion label as the space type filter where possible.
 - Keeps only spaces with presence-health status `healthy`, `degraded`, or `offline`.
 - Pulls `/v3/analytics/sessions/raw` and stores five-minute simultaneous-use concurrency rows.
+- Splits the generated data into `data/catalog.json` and `data/metrics.json` so the page can load filters quickly and defer heavy usage metrics until a building is selected.
+
+Daily threshold metrics use `metrics.intervals` from Atlas/time-used data when present, and fall back to raw-session-derived minutes when interval rows are not present. Hourly simultaneous-use metrics use raw-session concurrency.
 
 ## Check Against Atlas CSV
 

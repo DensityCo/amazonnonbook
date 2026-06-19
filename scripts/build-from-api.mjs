@@ -4,12 +4,20 @@ import path from "node:path";
 const tokenPath = process.env.DENSITY_API_TOKEN_FILE || "env/density-api-token.txt";
 const outputPath = process.argv[2] || path.join("data", "dashboard-data.json");
 const apiBase = process.env.DENSITY_API_BASE || "https://api.density.io";
+const targetBuildingCodes = new Set(
+  (process.env.AMAZON_NONBOOKABLE_BUILDINGS || "SEA25,SEA37,SEA44,SJC31,JFK27")
+    .split(",")
+    .map((code) => code.trim().toUpperCase())
+    .filter(Boolean)
+);
 
 const includedPresenceHealthStatuses = new Set(["healthy", "degraded", "offline"]);
 
 const targetLabels = new Map([
   ["focus", "Focus Rooms"],
+  ["focus room", "Focus Rooms"],
   ["huddle", "Huddle Rooms"],
+  ["huddle room", "Huddle Rooms"],
   ["phone", "Phone Booths"],
   ["phone room", "Phone Rooms"],
   ["phone booth", "Phone Booths"],
@@ -29,16 +37,11 @@ const targetLabels = new Map([
 ]);
 
 const requestedRange = {
-  start: "2026-04-20",
-  end: "2026-05-15",
+  start: process.env.AMAZON_NONBOOKABLE_START_DATE || "2026-04-20",
+  end: process.env.AMAZON_NONBOOKABLE_END_DATE || "2026-06-17",
   businessHours: "Monday-Friday 09:00-17:00 local"
 };
-const weeklyWindows = [
-  { start: "2026-04-20", end: "2026-04-24" },
-  { start: "2026-04-27", end: "2026-05-01" },
-  { start: "2026-05-04", end: "2026-05-08" },
-  { start: "2026-05-11", end: "2026-05-15" }
-];
+const weeklyWindows = weeklyWindowsForRange(requestedRange.start, requestedRange.end);
 
 function readToken() {
   if (!fs.existsSync(tokenPath)) {
@@ -174,6 +177,13 @@ function buildingFor(space, byId) {
   return null;
 }
 
+function buildingCode(building) {
+  return String(building?.name || building?.id || "")
+    .split(" - ")[0]
+    .trim()
+    .toUpperCase();
+}
+
 function chunk(items, size) {
   const chunks = [];
   for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
@@ -206,6 +216,30 @@ function businessDates(start, end) {
     cursor.setDate(cursor.getDate() + 1);
   }
   return dates;
+}
+
+function weeklyWindowsForRange(start, end) {
+  const windows = [];
+  const cursor = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (cursor <= last) {
+    const day = cursor.getDay();
+    if (day === 0 || day === 6) {
+      cursor.setDate(cursor.getDate() + 1);
+      continue;
+    }
+    const windowStart = cursor.toISOString().slice(0, 10);
+    const windowEndDate = new Date(cursor);
+    windowEndDate.setDate(cursor.getDate() + (5 - day));
+    if (windowEndDate > last) windowEndDate.setTime(last.getTime());
+    windows.push({
+      start: windowStart,
+      end: windowEndDate.toISOString().slice(0, 10)
+    });
+    cursor.setTime(windowEndDate.getTime());
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return windows;
 }
 
 function buildDashboardData(spaceCatalog, dates, metadata) {
@@ -262,7 +296,12 @@ const candidateSpaces = [...byId.values()]
   })
   .filter(
     ({ space, labels, type, floor, building }) =>
-      building && floor && type && hasNonBookableLabel(labels) && spaceKind(space) === "space"
+      building &&
+      floor &&
+      type &&
+      targetBuildingCodes.has(buildingCode(building)) &&
+      hasNonBookableLabel(labels) &&
+      spaceKind(space) === "space"
   );
 
 const presenceBySpace = await fetchPresenceHealth(token, candidateSpaces);
