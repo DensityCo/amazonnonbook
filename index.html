@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Amazon Non-Bookable Space Usage</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=threshold-line-labels-20260618" />
+    <link rel="stylesheet" href="styles.css?v=daily-hourly-tabs-20260618-jfk27-floor-labels-threshold-row" />
   </head>
   <body>
     <header class="topbar">
@@ -30,9 +30,12 @@
           Space type
           <select id="type-filter"></select>
         </label>
-        <label>
+        <label class="threshold-label">
           Used threshold
-          <select id="threshold-filter"></select>
+          <span class="threshold-control">
+            <input id="threshold-filter" type="range" min="1" max="6" step="0.5" value="1" aria-describedby="threshold-value" />
+            <span id="threshold-value">1 hr+</span>
+          </span>
         </label>
         <label>
           Start date
@@ -64,183 +67,211 @@
       </section>
 
       <div id="dashboard" hidden>
-        <section class="insight" aria-label="Usage summary insight">
-          <div>
-            <p class="eyebrow" id="insight-scope">Selected non-bookable spaces</p>
-            <h2 id="insight-title">Loading non-bookable usage...</h2>
-            <p id="insight-copy"></p>
-          </div>
-          <div class="insight-kpis">
-            <article>
-              <span id="kpi-average-label">Used threshold</span>
-              <strong id="kpi-average">-</strong>
-              <small id="kpi-average-sub">spaces at or above threshold</small>
-            </article>
-          </div>
-        </section>
+        <nav class="dashboard-tabs" aria-label="Dashboard views">
+          <button type="button" class="active" data-tab="daily">Daily trend</button>
+          <button type="button" data-tab="hourly">Hourly pattern</button>
+        </nav>
 
-        <section class="panel">
-          <div class="panel-heading">
+        <div id="daily-tab" class="tab-panel" data-panel="daily">
+          <section class="insight" aria-label="Daily usage summary insight">
             <div>
-              <h2>Selected space inventory</h2>
-              <span>Non-bookable spaces in the current building and floor scope by space type</span>
+              <p class="eyebrow" id="insight-scope">Selected non-bookable spaces</p>
+              <h2 id="insight-title">Loading non-bookable usage...</h2>
+              <p id="insight-copy"></p>
             </div>
-          </div>
-          <div id="inventory-breakdown" class="inventory-breakdown"></div>
-        </section>
-
-        <section class="kpis" aria-label="Key metrics">
-          <article>
-            <span class="metric-label">
-              Avg daily used spaces
-              <span class="tooltip-wrap">
-                <button type="button" class="info-tooltip" aria-label="About average daily used spaces" aria-describedby="avg-daily-used-tooltip">i</button>
-                <span class="tooltip-text" id="avg-daily-used-tooltip" role="tooltip">
-                  Average number of distinct selected spaces with at least one occupied five-minute slice per selected day. Calculated by counting used spaces each selected day, then averaging those daily counts.
-                </span>
-              </span>
-            </span>
-            <strong id="kpi-average-share">-</strong>
-          </article>
-          <article>
-            <span class="metric-label">
-              Peak simultaneous use
-              <span class="tooltip-wrap">
-                <button type="button" class="info-tooltip" aria-label="About peak simultaneous use" aria-describedby="peak-simultaneous-tooltip">i</button>
-                <span class="tooltip-text" id="peak-simultaneous-tooltip" role="tooltip">
-                  Highest count of selected spaces active in the same five-minute slice during the selected dates, weekdays, and hours. Calculated from occupied raw sessions at five-minute grain.
-                </span>
-              </span>
-            </span>
-            <strong id="kpi-peak-share">-</strong>
-          </article>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <h2>Space type breakdown</h2>
-              <span>Inventory, used-space counts, threshold use, hours, and peak simultaneous use by type</span>
+            <div class="insight-kpis">
+              <article>
+                <span id="kpi-average-label">Used threshold</span>
+                <strong id="kpi-average">-</strong>
+                <small id="kpi-average-sub">spaces at or above threshold</small>
+              </article>
             </div>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Space type</th>
-                  <th>Spaces</th>
-                  <th>Spaces used</th>
-                  <th>Used threshold</th>
-                  <th>Avg hrs / used space</th>
-                  <th>Peak simultaneous</th>
-                  <th>Peak simultaneous %</th>
-                </tr>
-              </thead>
-              <tbody id="type-breakdown-table"></tbody>
-            </table>
-          </div>
-        </section>
+          </section>
 
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <h2>Daily used spaces over time</h2>
-              <span>Spaces meeting the selected used threshold</span>
-            </div>
-            <div class="chart-legend" aria-label="Daily used-space legend">
-              <span><i class="legend-threshold"></i><span id="daily-threshold-legend">Used threshold</span></span>
-            </div>
-          </div>
-          <div id="daily-trend" class="daily-trend"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <h2>Spaces used by weekday</h2>
-              <span>Threshold spaces and average occupied hours by weekday</span>
-            </div>
-          </div>
-          <div id="weekday-summary" class="weekday-summary"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <h2>Hourly usage by weekday</h2>
-              <span>Average hourly count of selected non-bookable spaces with use</span>
-            </div>
-          </div>
-          <div id="weekday-line-summary" class="weekday-line-summary"></div>
-        </section>
-
-        <section class="grid one">
-          <div class="panel">
+          <section class="panel">
             <div class="panel-heading">
               <div>
-                <h2>Hourly simultaneous-use context</h2>
-                <span>Average percentage active across each hour's twelve five-minute slices</span>
+                <h2>Selected space inventory</h2>
+                <span>Non-bookable spaces in the current building and floor scope by space type</span>
               </div>
             </div>
-            <div id="heatmap" class="heatmap"></div>
-          </div>
-        </section>
+            <div id="inventory-breakdown" class="inventory-breakdown"></div>
+          </section>
 
-        <section class="panel">
-          <div class="panel-heading">
+          <section class="kpis" aria-label="Daily key metrics">
+            <article>
+              <span class="metric-label">
+                Avg daily spaces above threshold
+                <span class="tooltip-wrap">
+                  <button type="button" class="info-tooltip" aria-label="About average daily spaces above threshold" aria-describedby="avg-daily-used-tooltip">i</button>
+                  <span class="tooltip-text" id="avg-daily-used-tooltip" role="tooltip">
+                    Average number of distinct selected spaces whose occupied minutes met the selected threshold on a selected day.
+                  </span>
+                </span>
+              </span>
+              <strong id="kpi-average-share">-</strong>
+            </article>
+            <article>
+              <span class="metric-label">
+                Peak daily spaces above threshold
+                <span class="tooltip-wrap">
+                  <button type="button" class="info-tooltip" aria-label="About peak daily spaces above threshold" aria-describedby="peak-daily-used-tooltip">i</button>
+                  <span class="tooltip-text" id="peak-daily-used-tooltip" role="tooltip">
+                    Highest daily count of selected spaces whose occupied minutes met the selected threshold.
+                  </span>
+                </span>
+              </span>
+              <strong id="kpi-peak-share">-</strong>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2 id="comparison-heading">Scope comparison</h2>
+                <span id="comparison-subtitle">Usage change by building, floor, or space type</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th id="comparison-group-heading">Group</th>
+                    <th>Spaces</th>
+                    <th>Avg spaces used</th>
+                    <th>Avg hrs / space / day</th>
+                    <th>Peak day</th>
+                    <th>Week-over-week</th>
+                  </tr>
+                </thead>
+                <tbody id="comparison-table"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Daily used spaces over time</h2>
+                <span>Spaces meeting the selected used threshold</span>
+              </div>
+              <div class="chart-legend" aria-label="Daily used-space legend">
+                <span><i class="legend-threshold"></i><span id="daily-threshold-legend">Used threshold</span></span>
+              </div>
+            </div>
+            <div id="daily-trend" class="daily-trend"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Spaces used by weekday</h2>
+                <span>Threshold spaces and average occupied hours by weekday</span>
+              </div>
+            </div>
+            <div id="weekday-summary" class="weekday-summary"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Daily usage detail</h2>
+                <span>Daily threshold use by floor or building</span>
+              </div>
+              <button type="button" id="daily-detail-toggle" class="expand-button" aria-expanded="false" aria-controls="daily-detail-body">
+                Expand
+              </button>
+            </div>
+            <div id="daily-detail-body" hidden>
+              <div class="detail-toolbar">
+                <div class="segmented daily-group-toggle" aria-label="Daily grouping">
+                  <button type="button" class="active" data-group="floor">Floor</button>
+                  <button type="button" data-group="building">Building</button>
+                </div>
+              </div>
+              <div class="table-filters" aria-label="Daily usage detail filters">
+                <label>
+                  Date
+                  <select id="daily-date-filter"></select>
+                </label>
+                <label>
+                  Day
+                  <select id="daily-day-filter"></select>
+                </label>
+                <label>
+                  Building
+                  <select id="daily-building-filter"></select>
+                </label>
+                <label>
+                  Floor
+                  <select id="daily-floor-filter"></select>
+                </label>
+                <label>
+                  Space type
+                  <select id="daily-type-filter"></select>
+                </label>
+              </div>
+              <div class="table-wrap">
+                <table class="daily-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Day</th>
+                      <th>Building</th>
+                      <th id="daily-floor-heading">Floor</th>
+                      <th>Space type</th>
+                      <th id="daily-threshold-heading">Used threshold</th>
+                      <th>Avg hrs / selected space</th>
+                    </tr>
+                  </thead>
+                  <tbody id="daily-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div id="hourly-tab" class="tab-panel" data-panel="hourly" hidden>
+          <section class="insight" aria-label="Hourly usage summary insight">
             <div>
-              <h2>Daily usage detail</h2>
-              <span>Daily usage and peak simultaneous context by floor or building</span>
+              <p class="eyebrow" id="hourly-insight-scope">Selected non-bookable spaces</p>
+              <h2 id="hourly-insight-title">Loading hourly usage...</h2>
+              <p id="hourly-insight-copy"></p>
             </div>
-            <div class="segmented" aria-label="Daily grouping">
-              <button type="button" class="active" data-group="floor">Floor</button>
-              <button type="button" data-group="building">Building</button>
+            <div class="insight-kpis">
+              <article>
+                <span>Busiest hour</span>
+                <strong id="hourly-kpi-hour">-</strong>
+                <small id="hourly-kpi-hour-sub">highest average active count</small>
+              </article>
             </div>
-          </div>
-          <div class="table-filters" aria-label="Daily usage detail filters">
-            <label>
-              Date
-              <select id="daily-date-filter"></select>
-            </label>
-            <label>
-              Day
-              <select id="daily-day-filter"></select>
-            </label>
-            <label>
-              Building
-              <select id="daily-building-filter"></select>
-            </label>
-            <label>
-              Floor
-              <select id="daily-floor-filter"></select>
-            </label>
-            <label>
-              Space type
-              <select id="daily-type-filter"></select>
-            </label>
-          </div>
-          <div class="table-wrap">
-            <table class="daily-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Day</th>
-                  <th>Building</th>
-                  <th id="daily-floor-heading">Floor</th>
-                  <th>Space type</th>
-                  <th id="daily-threshold-heading">Used threshold</th>
-                  <th>Avg hrs / used space</th>
-                  <th>Peak active spaces</th>
-                  <th>Peak time</th>
-                </tr>
-              </thead>
-              <tbody id="daily-table"></tbody>
-            </table>
-          </div>
-        </section>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>Hourly usage by weekday</h2>
+                <span>Average hourly count of selected non-bookable spaces with use</span>
+              </div>
+            </div>
+            <div id="weekday-line-summary" class="weekday-line-summary"></div>
+          </section>
+
+          <section class="grid one">
+            <div class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Hourly simultaneous-use context</h2>
+                  <span>Average percentage active across each hour's twelve five-minute slices</span>
+                </div>
+              </div>
+              <div id="heatmap" class="heatmap"></div>
+            </div>
+          </section>
+        </div>
       </div>
     </main>
 
-    <script src="app.js?v=threshold-line-labels-20260618" type="module"></script>
+    <script src="app.js?v=daily-hourly-tabs-20260618-jfk27-through-jun17" type="module"></script>
   </body>
 </html>

@@ -1,5 +1,9 @@
 const state = {
   data: null,
+  metricsLoaded: false,
+  metricsLoading: null,
+  activeTab: "daily",
+  dailyDetailExpanded: false,
   dailyGroup: "floor",
   filters: {
     buildingIds: new Set(),
@@ -27,11 +31,14 @@ const els = {
   floorFilter: document.querySelector("#floor-filter"),
   typeFilter: document.querySelector("#type-filter"),
   thresholdFilter: document.querySelector("#threshold-filter"),
+  thresholdValue: document.querySelector("#threshold-value"),
   startDateFilter: document.querySelector("#start-date-filter"),
   endDateFilter: document.querySelector("#end-date-filter"),
   startHourFilter: document.querySelector("#start-hour-filter"),
   endHourFilter: document.querySelector("#end-hour-filter"),
   dayButtons: [...document.querySelectorAll(".day-filter button")],
+  tabButtons: [...document.querySelectorAll(".dashboard-tabs button")],
+  tabPanels: [...document.querySelectorAll(".tab-panel")],
   emptyState: document.querySelector("#empty-state"),
   dashboard: document.querySelector("#dashboard"),
   insightScope: document.querySelector("#insight-scope"),
@@ -42,7 +49,16 @@ const els = {
   kpiAverageSub: document.querySelector("#kpi-average-sub"),
   kpiAverageShare: document.querySelector("#kpi-average-share"),
   kpiPeakShare: document.querySelector("#kpi-peak-share"),
-  dailyGroupButtons: [...document.querySelectorAll(".segmented button")],
+  comparisonHeading: document.querySelector("#comparison-heading"),
+  comparisonSubtitle: document.querySelector("#comparison-subtitle"),
+  comparisonGroupHeading: document.querySelector("#comparison-group-heading"),
+  comparisonTable: document.querySelector("#comparison-table"),
+  hourlyInsightScope: document.querySelector("#hourly-insight-scope"),
+  hourlyInsightTitle: document.querySelector("#hourly-insight-title"),
+  hourlyInsightCopy: document.querySelector("#hourly-insight-copy"),
+  hourlyKpiHour: document.querySelector("#hourly-kpi-hour"),
+  hourlyKpiHourSub: document.querySelector("#hourly-kpi-hour-sub"),
+  dailyGroupButtons: [...document.querySelectorAll(".daily-group-toggle button")],
   weekdaySummary: document.querySelector("#weekday-summary"),
   weekdayLineSummary: document.querySelector("#weekday-line-summary"),
   inventoryBreakdown: document.querySelector("#inventory-breakdown"),
@@ -53,11 +69,12 @@ const els = {
   dailyBuildingFilter: document.querySelector("#daily-building-filter"),
   dailyFloorFilter: document.querySelector("#daily-floor-filter"),
   dailyTypeFilter: document.querySelector("#daily-type-filter"),
+  dailyDetailToggle: document.querySelector("#daily-detail-toggle"),
+  dailyDetailBody: document.querySelector("#daily-detail-body"),
   dailyFloorHeading: document.querySelector("#daily-floor-heading"),
   dailyThresholdHeading: document.querySelector("#daily-threshold-heading"),
   dailyTable: document.querySelector("#daily-table"),
-  heatmap: document.querySelector("#heatmap"),
-  typeBreakdownTable: document.querySelector("#type-breakdown-table")
+  heatmap: document.querySelector("#heatmap")
 };
 
 for (const [name, element] of Object.entries(els)) {
@@ -69,35 +86,71 @@ const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const businessDays = [1, 2, 3, 4, 5];
 const lineColors = ["#3367c2", "#2bb8a8", "#d5965f", "#8c5be8", "#159fd3"];
 
-fetch("data/dashboard-data.json?v=dashboard-order-20260618")
-  .then((response) => {
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  })
-  .then((data) => {
-    state.data = data;
+loadInitialData();
+
+async function loadInitialData() {
+  try {
+    const catalogResponse = await fetch("data/catalog.json?v=daily-hourly-tabs-20260618-jfk27-through-jun17");
+    if (catalogResponse.ok) {
+      const catalog = await catalogResponse.json();
+      state.data = { ...catalog, metrics: {} };
+      state.metricsLoaded = false;
+    } else {
+      const response = await fetch("data/dashboard-data.json?v=daily-hourly-tabs-20260618-jfk27-through-jun17");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      state.data = await response.json();
+      state.metricsLoaded = Boolean(state.data.metrics?.concurrency);
+    }
     setupFilters();
     render();
-  })
-  .catch((error) => {
+  } catch (error) {
     els.sourceNote.textContent = `Could not load dashboard data: ${error.message}`;
-  });
+  }
+}
+
+async function ensureMetricsLoaded() {
+  if (state.metricsLoaded) return true;
+  if (!state.metricsLoading) {
+    els.sourceNote.textContent = "Loading usage metrics...";
+    state.metricsLoading = fetch("data/metrics.json?v=daily-hourly-tabs-20260618-jfk27-through-jun17")
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const metricsPayload = await response.json();
+        state.data = {
+          ...state.data,
+          metrics: metricsPayload.metrics || metricsPayload,
+          metadata: {
+            ...(state.data.metadata || {}),
+            ...(metricsPayload.metadata || {})
+          },
+          dimensions: {
+            ...(state.data.dimensions || {}),
+            ...(metricsPayload.dimensions || {})
+          }
+        };
+        state.metricsLoaded = true;
+        state.metricsLoading = null;
+      })
+      .catch((error) => {
+        state.metricsLoading = null;
+        els.sourceNote.textContent = `Could not load usage metrics: ${error.message}`;
+        throw error;
+      });
+  }
+  await state.metricsLoading;
+  return true;
+}
 
 function setupFilters() {
   const dates = availableDates();
   state.filters.startDate = state.data.metadata?.includedRange?.start || dates[0] || "";
   state.filters.endDate = state.data.metadata?.includedRange?.end || dates.at(-1) || "";
+  const minDate = dates[0] || "";
+  const maxDate = dates.at(-1) || "";
 
   setOptions(els.typeFilter, [
     { value: "all", label: "All non-bookable types" },
     ...availableTypes().map((type) => ({ value: type, label: type }))
-  ]);
-  setOptions(els.thresholdFilter, [
-    { value: 0.25, label: "15 min+" },
-    { value: 0.5, label: "30 min+" },
-    { value: 1, label: "1 hr+" },
-    { value: 2, label: "2 hrs+" },
-    { value: 4, label: "4 hrs+" }
   ]);
   setOptions(
     els.startHourFilter,
@@ -110,6 +163,11 @@ function setupFilters() {
 
   els.typeFilter.value = state.filters.type;
   els.thresholdFilter.value = state.filters.thresholdHours;
+  renderThresholdValue();
+  els.startDateFilter.min = minDate;
+  els.startDateFilter.max = maxDate;
+  els.endDateFilter.min = minDate;
+  els.endDateFilter.max = maxDate;
   els.startDateFilter.value = state.filters.startDate;
   els.endDateFilter.value = state.filters.endDate;
   els.startHourFilter.value = state.filters.startHour;
@@ -121,14 +179,29 @@ function setupFilters() {
   });
   els.thresholdFilter.addEventListener("change", () => {
     state.filters.thresholdHours = Number(els.thresholdFilter.value);
+    renderThresholdValue();
     render();
   });
+  els.thresholdFilter.addEventListener("input", () => {
+    state.filters.thresholdHours = Number(els.thresholdFilter.value);
+    renderThresholdValue();
+  });
   els.startDateFilter.addEventListener("change", () => {
-    state.filters.startDate = els.startDateFilter.value;
+    state.filters.startDate = clampDateToAvailableRange(els.startDateFilter.value);
+    els.startDateFilter.value = state.filters.startDate;
+    if (state.filters.endDate < state.filters.startDate) {
+      state.filters.endDate = state.filters.startDate;
+      els.endDateFilter.value = state.filters.endDate;
+    }
     render();
   });
   els.endDateFilter.addEventListener("change", () => {
-    state.filters.endDate = els.endDateFilter.value;
+    state.filters.endDate = clampDateToAvailableRange(els.endDateFilter.value);
+    els.endDateFilter.value = state.filters.endDate;
+    if (state.filters.startDate > state.filters.endDate) {
+      state.filters.startDate = state.filters.endDate;
+      els.startDateFilter.value = state.filters.startDate;
+    }
     render();
   });
   els.startHourFilter.addEventListener("change", () => {
@@ -155,24 +228,36 @@ function setupFilters() {
       render();
     });
   }
+  for (const button of els.tabButtons) {
+    button.addEventListener("click", () => {
+      state.activeTab = button.dataset.tab;
+      render();
+    });
+  }
   for (const button of els.dailyGroupButtons) {
     button.addEventListener("click", () => {
       state.dailyGroup = button.dataset.group;
       render();
     });
   }
+  els.dailyDetailToggle.addEventListener("click", () => {
+    state.dailyDetailExpanded = !state.dailyDetailExpanded;
+    render();
+  });
   for (const [key, select] of Object.entries(dailyTableFilterElements())) {
     select.addEventListener("change", () => {
       state.tableFilters[key] = select.value;
-      renderDailyTable(filteredSpaces(), computeUsageSummary(filteredSpaces()));
+      if (state.dailyDetailExpanded) renderDailyTable(filteredSpaces(), computeUsageSummary(filteredSpaces()));
     });
   }
 }
 
 function render() {
+  if (!state.data) return;
   renderBuildingPills();
   renderFloorPills();
   refreshDayButtons();
+  refreshTabs();
   for (const button of els.dailyGroupButtons) {
     button.classList.toggle("active", button.dataset.group === state.dailyGroup);
   }
@@ -182,20 +267,47 @@ function render() {
   els.emptyState.hidden = hasBuildingSelection;
   els.dashboard.hidden = !hasBuildingSelection;
   if (!hasBuildingSelection) return;
+  if (!state.metricsLoaded) {
+    ensureMetricsLoaded()
+      .then(() => render())
+      .catch(() => {});
+    return;
+  }
 
   const spaces = filteredSpaces();
-  const summary = computeSummary(spaces);
-  const usage = computeUsageSummary(spaces, summary);
+  const usage = computeUsageSummary(spaces);
 
-  renderInsight(spaces, summary, usage);
-  renderKpis(spaces, summary, usage);
-  renderInventoryBreakdown(spaces);
-  renderTypeBreakdown(spaces);
-  renderDailyTrend(spaces, usage);
-  renderWeekdaySummary(spaces, usage);
-  renderWeekdayLineSummary(spaces);
-  renderDailyTable(spaces, usage);
-  renderHeatmap(summary);
+  if (state.activeTab === "daily") {
+    renderDailyInsight(spaces, usage);
+    renderKpis(spaces, usage);
+    renderInventoryBreakdown(spaces);
+    renderComparison(spaces, usage);
+    renderDailyTrend(spaces, usage);
+    renderWeekdaySummary(spaces, usage);
+    renderDailyDetail(spaces, usage);
+  } else {
+    const summary = computeSummary(spaces);
+    renderHourlyInsight(spaces, summary, usage);
+    renderWeekdayLineSummary(spaces);
+    renderHeatmap(summary);
+  }
+}
+
+function renderThresholdValue() {
+  els.thresholdValue.textContent = thresholdLabelText();
+}
+
+function renderDailyDetail(spaces, usage) {
+  els.dailyDetailToggle.textContent = state.dailyDetailExpanded ? "Collapse" : "Expand";
+  els.dailyDetailToggle.classList.toggle("active", state.dailyDetailExpanded);
+  els.dailyDetailToggle.setAttribute("aria-expanded", String(state.dailyDetailExpanded));
+  els.dailyDetailBody.hidden = !state.dailyDetailExpanded;
+
+  if (state.dailyDetailExpanded) {
+    renderDailyTable(spaces, usage);
+  } else {
+    els.dailyTable.replaceChildren();
+  }
 }
 
 function renderBuildingPills() {
@@ -220,7 +332,7 @@ function renderFloorPills() {
   const options = [{ id: "all", label: "All" }].concat(
     floors.map((floor) => ({
       id: floor.floorId,
-      label: `${shortBuildingName(floor.buildingName)} ${floor.floorName.replace(/^Floor\s*/i, "")}`
+      label: floorPillLabel(floor)
     }))
   );
   const allowed = new Set(options.map((option) => option.id));
@@ -273,8 +385,16 @@ function refreshDayButtons() {
   }
 }
 
-function renderInsight(spaces, summary, usage) {
-  const peak = summary.peak;
+function refreshTabs() {
+  for (const button of els.tabButtons) {
+    button.classList.toggle("active", button.dataset.tab === state.activeTab);
+  }
+  for (const panel of els.tabPanels) {
+    panel.hidden = panel.dataset.panel !== state.activeTab;
+  }
+}
+
+function renderDailyInsight(spaces, usage) {
   const typeLabel = selectedTypeLabel();
   const thresholdLabel = thresholdLabelText();
   els.insightScope.textContent = [
@@ -291,18 +411,75 @@ function renderInsight(spaces, summary, usage) {
     return;
   }
 
-  els.insightTitle.innerHTML = `The average ${escapeHtml(averageSubjectLabel())} was used for <span>${number(usage.avgHoursPerSpacePerDay, 1)} hours</span> per selected day.`;
-  els.insightCopy.textContent = peak.active
-    ? `${weekOverWeekSentence(usage.weekOverWeek)} ${number(usage.averageDailyThreshold, 0)} spaces per day were used ${thresholdLabel} based on the time filter. Peak simultaneous use reached ${number(peak.active, 0)} spaces, or ${formatShare(spaces.length ? peak.active / spaces.length : 0, 0)} of all selected spaces, on ${dayNames[peak.day]} ${peak.date} at ${formatTimeOfDay(peak.hour, peak.minute)}.`
-    : "No raw-session activity was present in the selected window.";
+  els.insightTitle.innerHTML = `${number(usage.averageDailyThreshold, 0)} of ${spaces.length} selected ${escapeHtml(subjectPluralLabel())} met the ${escapeHtml(thresholdLabel)} threshold on an average day in the selected date range.`;
+  els.insightCopy.innerHTML = buildingInsightLines(spaces, usage, thresholdLabel).join("<br>");
 }
 
-function renderKpis(spaces, summary, usage) {
-  els.kpiAverageLabel.textContent = `Used ${thresholdLabelText()}`;
-  els.kpiAverage.textContent = `${number(usage.averageDailyThreshold, 0)}/${spaces.length}`;
-  els.kpiAverageSub.textContent = "avg spaces per selected day";
-  els.kpiAverageShare.textContent = number(usage.averageDailyUsed, 0);
-  els.kpiPeakShare.textContent = `${number(summary.peak.active, 0)}/${spaces.length}`;
+function renderHourlyInsight(spaces, summary, usage) {
+  const peak = summary.peak;
+  els.hourlyInsightScope.textContent = [
+    selectedBuildingLabel(),
+    selectedFloorLabel(),
+    selectedTypeLabel(),
+    `${state.filters.startDate} to ${state.filters.endDate}`,
+    `${formatHour(state.filters.startHour)}-${formatHour(state.filters.endHour)}`
+  ].join(" · ");
+
+  if (!spaces.length) {
+    els.hourlyInsightTitle.textContent = "No labeled non-bookable spaces match the selected filters.";
+    els.hourlyInsightCopy.textContent = "Choose another building, floor, or space type.";
+    return;
+  }
+
+  const busiest = busiestHour(summary);
+  els.hourlyInsightTitle.innerHTML = `At the busiest times, <span>${number(peak.active, 0)} of ${spaces.length}</span> selected ${escapeHtml(subjectPluralLabel())} were in use simultaneously.`;
+  els.hourlyInsightCopy.innerHTML = hourlyInsightCopy(spaces, summary, busiest);
+  els.hourlyKpiHour.textContent = busiest ? formatHourLabel(busiest.hour) : "-";
+  els.hourlyKpiHourSub.textContent = busiest ? `${dayNames[busiest.day]} · ${number(busiest.value, 1)} avg active spaces` : "no hourly activity";
+}
+
+function hourlyInsightCopy(spaces, summary, busiest) {
+  if (!summary.peak.active) return "No raw-session activity was present in the selected window.";
+
+  const buildingLines = hourlyPeakLinesByBuilding(spaces);
+  if (buildingLines.length > 1) return buildingLines.join("<br>");
+
+  const peak = summary.peak;
+  const busiestSentence = busiest
+    ? ` ${dayNames[busiest.day]} at ${formatHourLabel(busiest.hour)} had the highest average active count at ${number(busiest.value, 1)} spaces.`
+    : "";
+  return `Peak simultaneous use happened on ${dayNames[peak.day]} ${peak.date} at ${formatTimeOfDay(peak.hour, peak.minute)}.${busiestSentence}`;
+}
+
+function hourlyPeakLinesByBuilding(spaces) {
+  return [...groupBy(spaces, (space) => space.buildingId)]
+    .map(([, groupSpaces]) => {
+      const summary = computeSummary(groupSpaces);
+      return {
+        label: shortBuildingName(groupSpaces[0].buildingName),
+        spaceCount: groupSpaces.length,
+        peak: summary.peak
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }))
+    .map((group) => {
+      if (!group.peak.active) {
+        return `<strong>${escapeHtml(group.label)}</strong>: no simultaneous use in the selected window.`;
+      }
+      const peakShare = formatShare(group.spaceCount ? group.peak.active / group.spaceCount : 0, 0);
+      return `<strong>${escapeHtml(group.label)}</strong>: peak simultaneous use was ${number(group.peak.active, 0)} of ${group.spaceCount} selected spaces (${peakShare}) on ${dayNames[group.peak.day]} ${escapeHtml(group.peak.date)} at ${formatTimeOfDay(group.peak.hour, group.peak.minute)}.`;
+    });
+}
+
+function renderKpis(spaces, usage) {
+  const week = usage.weekOverWeek;
+  els.kpiAverageLabel.textContent = "Week-over-week change";
+  els.kpiAverage.textContent = formatDailyWeekOverWeekValue(week);
+  els.kpiAverageSub.textContent = formatDailyWeekOverWeekSubtext(week);
+  els.kpiAverageShare.textContent = `${number(usage.averageDailyThreshold, 0)}/${spaces.length}`;
+  els.kpiPeakShare.textContent = usage.peakDailyThreshold
+    ? `${number(usage.peakDailyThreshold.thresholdCount, 0)}/${spaces.length}`
+    : `0/${spaces.length}`;
 }
 
 function renderWeekdaySummary(spaces, usage) {
@@ -457,22 +634,33 @@ function renderInventoryBreakdown(spaces) {
 
 function renderDailyTrend(spaces, usage) {
   const rows = selectedDateEntries().map(({ date, day }) => usage.daily.get(date) || emptyDailyUsage(date, day));
-  const maxValue = Math.max(...rows.map((row) => row.thresholdCount), 1);
+  const groups = comparisonGroups(spaces);
+  const series =
+    groups.length > 1 && groups.length <= 8
+      ? groups.map((group) => ({
+          label: group.label,
+          rows: selectedDateEntries().map(({ date, day }) =>
+            usageForSpacesOnDate(group.spaces, date, usage.bySpaceDate, day)
+          )
+        }))
+      : [{ label: selectedBuildingLabel(), rows }];
+  const maxValue = Math.max(...series.flatMap((item) => item.rows.map((row) => row.thresholdCount)), 1);
   const thresholdLabel = thresholdLabelText();
-  els.dailyThresholdLegend.textContent = `Used ${thresholdLabel}`;
-  els.dailyTrend.innerHTML = dailyTrendSvg(rows, maxValue, spaces.length, thresholdLabel);
+  els.dailyThresholdLegend.textContent = series.length > 1 ? `Used ${thresholdLabel} by ${comparisonModeLabel().toLowerCase()}` : `Used ${thresholdLabel}`;
+  els.dailyTrend.innerHTML = dailyTrendSvg(series, maxValue, thresholdLabel);
 }
 
-function dailyTrendSvg(rows, maxValue, spaceCount, thresholdLabel) {
+function dailyTrendSvg(series, maxValue, thresholdLabel) {
   const width = 1120;
   const height = 220;
-  const pad = { left: 42, right: 20, top: 20, bottom: 44 };
+  const rows = series[0]?.rows || [];
+  const pad = { left: 42, right: 24, top: 24, bottom: 44 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const yMax = Math.max(maxValue, 1);
   const xFor = (index) => pad.left + (rows.length <= 1 ? innerW / 2 : (index / (rows.length - 1)) * innerW);
   const yFor = (value) => pad.top + innerH - (value / yMax) * innerH;
-  const pointsFor = (key) => rows.map((row, index) => `${xFor(index)},${yFor(row[key])}`).join(" ");
+  const pointsFor = (itemRows) => itemRows.map((row, index) => `${xFor(index)},${yFor(row.thresholdCount)}`).join(" ");
   const labelRows = rows.filter((_, index) => index === 0 || index === rows.length - 1 || index % Math.ceil(rows.length / 8) === 0);
   const grid = [0, 0.5, 1];
 
@@ -491,51 +679,75 @@ function dailyTrendSvg(rows, maxValue, spaceCount, thresholdLabel) {
           return `<text x="${x}" y="${height - 16}" text-anchor="${index === 0 ? "start" : index === labelRows.length - 1 ? "end" : "middle"}" class="daily-chart-label">${escapeHtml(row.date.slice(5))}</text>`;
         })
         .join("")}
-      <polyline class="daily-line threshold" points="${pointsFor("thresholdCount")}"></polyline>
-      ${rows
+      ${series
+        .map((item, index) => {
+          const color = lineColors[index % lineColors.length];
+          return `<polyline class="daily-line threshold" style="stroke:${color}" points="${pointsFor(item.rows)}"><title>${escapeHtml(item.label)} used ${escapeHtml(thresholdLabel)}</title></polyline>`;
+        })
+        .join("")}
+      ${series.length === 1 ? rows
         .map((row, index) => {
           const x = xFor(index);
           const y = yFor(row.thresholdCount);
           return `
             <text x="${x}" y="${Math.max(12, y - 10)}" text-anchor="middle" class="daily-point-label">${number(row.thresholdCount, 0)}</text>
             <circle class="daily-dot threshold" cx="${x}" cy="${y}" r="3">
-              <title>${escapeHtml(row.date)}: ${row.thresholdCount} of ${spaceCount} spaces were used ${escapeHtml(thresholdLabel)}</title>
+              <title>${escapeHtml(row.date)}: ${row.thresholdCount} spaces were used ${escapeHtml(thresholdLabel)}</title>
             </circle>
           `;
         })
-        .join("")}
+        .join("") : ""}
+      ${series.length > 1
+        ? series
+            .map((item, index) => {
+              const y = 16 + index * 14;
+              const color = lineColors[index % lineColors.length];
+              return `<circle cx="${width - 190}" cy="${y - 4}" r="4" fill="${color}"></circle><text x="${width - 180}" y="${y}" class="daily-chart-label">${escapeHtml(item.label)}</text>`;
+            })
+            .join("")
+        : ""}
     </svg>
   `;
 }
 
-function renderTypeBreakdown(spaces) {
-  const rows = [...groupBy(spaces, (space) => space.type)]
-    .map(([type, groupSpaces]) => {
-      const usage = computeUsageSummary(groupSpaces, computeSummary(groupSpaces));
-      const summary = computeSummary(groupSpaces);
+function renderComparison(spaces, usage) {
+  const groups = comparisonGroups(spaces);
+  const mode = comparisonModeLabel();
+  els.comparisonHeading.textContent = `${mode} comparison`;
+  els.comparisonGroupHeading.textContent = mode;
+  els.comparisonSubtitle.textContent = `Daily threshold use and week-over-week change for the current ${selectedTypeLabel().toLowerCase()} scope`;
+
+  const rows = groups
+    .map((group) => {
+      const dailyRowsForGroup = selectedDateEntries().map(({ date, day }) =>
+        usageForSpacesOnDate(group.spaces, date, usage.bySpaceDate, day)
+      );
+      const averageDailyThreshold = dailyRowsForGroup.length ? sum(dailyRowsForGroup, "thresholdCount") / dailyRowsForGroup.length : 0;
+      const totalHours = sum(dailyRowsForGroup, "totalHours");
+      const avgHoursPerSpacePerDay = group.spaces.length && dailyRowsForGroup.length ? totalHours / group.spaces.length / dailyRowsForGroup.length : 0;
+      const peakDay = dailyRowsForGroup.reduce((best, row) => (row.thresholdCount > best.thresholdCount ? row : best), emptyDailyUsage(""));
+      const weekOverWeek = computeDailyWeekOverWeek(group.spaces, new Map(dailyRowsForGroup.map((row) => [row.date, row])));
       return {
-        type,
-        spaces: groupSpaces.length,
-        usedSpaces: usage.usedSpaces.size,
-        thresholdSpaces: usage.averageDailyThreshold,
-        avgHoursPerUsedSpace: usage.usedSpaces.size ? usage.totalHours / usage.usedSpaces.size : 0,
-        peakActive: summary.peak.active,
-        peakShare: groupSpaces.length ? summary.peak.active / groupSpaces.length : 0
+        label: group.label,
+        spaceCount: group.spaces.length,
+        averageDailyThreshold,
+        avgHoursPerSpacePerDay,
+        peakDay,
+        weekOverWeek
       };
     })
-    .sort((a, b) => b.usedSpaces - a.usedSpaces || b.spaces - a.spaces || a.type.localeCompare(b.type));
+    .sort((a, b) => b.averageDailyThreshold - a.averageDailyThreshold || a.label.localeCompare(b.label));
 
-  els.typeBreakdownTable.replaceChildren(
+  els.comparisonTable.replaceChildren(
     ...rows.map((row) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>${escapeHtml(row.type)}</td>
-        <td>${row.spaces}</td>
-        <td>${row.usedSpaces}</td>
-        <td>${number(row.thresholdSpaces, 1)}</td>
-        <td>${row.usedSpaces ? `${number(row.avgHoursPerUsedSpace, 1)}h` : "-"}</td>
-        <td>${number(row.peakActive, 0)}</td>
-        <td>${formatShare(row.peakShare, 1)}</td>
+        <td>${escapeHtml(row.label)}</td>
+        <td>${row.spaceCount}</td>
+        <td>${number(row.averageDailyThreshold, 0)}/${row.spaceCount}</td>
+        <td>${number(row.avgHoursPerSpacePerDay, 2)}h</td>
+        <td>${row.peakDay.date ? `${number(row.peakDay.thresholdCount, 0)} on ${escapeHtml(row.peakDay.date)}` : "-"}</td>
+        <td>${escapeHtml(compactDailyWeekOverWeek(row.weekOverWeek))}</td>
       `;
       return tr;
     })
@@ -558,9 +770,7 @@ function renderDailyTable(spaces, usage) {
         <td>${escapeHtml(row.floorName)}</td>
         <td>${escapeHtml(row.typeLabel)}</td>
         <td>${row.thresholdSpaces}/${row.spaceCount}</td>
-        <td>${row.usedSpaces ? `${number(row.avgHoursPerUsedSpace, 1)}h` : "-"}</td>
-        <td>${number(row.peakActive, 0)}</td>
-        <td>${row.peakActive ? formatTimeOfDay(row.peakHour, row.peakMinute) : "-"}</td>
+        <td>${number(row.avgHoursPerSelectedSpace, 2)}h</td>
       `;
       return tr;
     })
@@ -694,18 +904,24 @@ function computeUsageSummary(spaces) {
   const dateEntries = selectedDateEntries();
   const selectedDateIndexes = new Set(dateEntries.map((entry) => entry.index));
   const selectedHoursSet = new Set(selectedHours());
-  const bySpaceDate = new Map();
+  const intervalBySpaceDate = intervalMinutesBySpaceDate(spaces);
+  const bySpaceDate = intervalBySpaceDate || new Map();
   const bySpaceTotal = new Map();
 
-  for (const row of rows) {
-    const [spaceIndex, dateIndex, hour, minutes] = row;
-    const space = allSpaces[spaceIndex];
-    const date = dates[dateIndex];
-    if (!space || !selectedIds.has(space.spaceId)) continue;
-    if (!selectedDateIndexes.has(dateIndex)) continue;
-    if (!selectedHoursSet.has(hour)) continue;
-    addNumber(bySpaceDate, `${space.spaceId}|${date}`, minutes);
-    addNumber(bySpaceTotal, space.spaceId, minutes);
+  if (!intervalBySpaceDate) {
+    for (const row of rows) {
+      const [spaceIndex, dateIndex, hour, minutes] = row;
+      const space = allSpaces[spaceIndex];
+      const date = dates[dateIndex];
+      if (!space || !selectedIds.has(space.spaceId)) continue;
+      if (!selectedDateIndexes.has(dateIndex)) continue;
+      if (!selectedHoursSet.has(hour)) continue;
+      addNumber(bySpaceDate, `${space.spaceId}|${date}`, minutes);
+    }
+  }
+  for (const [key, minutes] of bySpaceDate) {
+    const [spaceId] = key.split("|");
+    addNumber(bySpaceTotal, spaceId, minutes);
   }
 
   const thresholdMinutes = state.filters.thresholdHours * 60;
@@ -720,7 +936,11 @@ function computeUsageSummary(spaces) {
   const averageDailyUsed = daily.size ? sum([...daily.values()], "usedCount") / daily.size : 0;
   const averageDailyThreshold = daily.size ? sum([...daily.values()], "thresholdCount") / daily.size : 0;
   const avgHoursPerSpacePerDay = spaces.length && daily.size ? totalHours / spaces.length / daily.size : 0;
-  const weekOverWeek = computeWeekOverWeek(spaces, daily);
+  const weekOverWeek = computeDailyWeekOverWeek(spaces, daily);
+  const peakDailyThreshold = [...daily.values()].reduce(
+    (best, row) => (row.thresholdCount > best.thresholdCount ? row : best),
+    emptyDailyUsage("")
+  );
 
   return {
     bySpaceDate,
@@ -732,18 +952,42 @@ function computeUsageSummary(spaces) {
     averageDailyUsed,
     averageDailyThreshold,
     avgHoursPerSpacePerDay,
-    weekOverWeek
+    weekOverWeek,
+    peakDailyThreshold
   };
 }
 
-function computeWeekOverWeek(spaces, daily) {
+function intervalMinutesBySpaceDate(spaces) {
+  const intervals = state.data.metrics?.intervals;
+  if (!Array.isArray(intervals) || !intervals.length) return null;
+  const selectedIds = new Set(spaces.map((space) => space.spaceId));
+  const selectedHoursSet = new Set(selectedHours());
+  const selectedDates = new Set(selectedDateEntries().map((entry) => entry.date));
+  const bySpaceDate = new Map();
+
+  for (const row of intervals) {
+    const spaceId = row.spaceId ?? row[0];
+    const date = row.date ?? row[1];
+    const hour = Number(row.hour ?? row[2]);
+    const usedMinutes = Number(row.usedMinutes ?? row[3] ?? 0);
+    if (!selectedIds.has(spaceId)) continue;
+    if (!selectedDates.has(date)) continue;
+    if (!selectedHoursSet.has(hour)) continue;
+    addNumber(bySpaceDate, `${spaceId}|${date}`, usedMinutes);
+  }
+  return bySpaceDate;
+}
+
+function computeDailyWeekOverWeek(spaces, daily) {
   const weeks = [...groupBy([...daily.values()], (row) => mondayOf(row.date))]
     .map(([weekStart, rows]) => {
       const totalHours = sum(rows, "totalHours");
+      const totalThreshold = sum(rows, "thresholdCount");
       const selectedDays = rows.length;
       return {
         weekStart,
         selectedDays,
+        averageDailyThreshold: selectedDays ? totalThreshold / selectedDays : 0,
         totalHours,
         avgHoursPerSpacePerDay: spaces.length && selectedDays ? totalHours / spaces.length / selectedDays : 0
       };
@@ -751,8 +995,8 @@ function computeWeekOverWeek(spaces, daily) {
     .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
   const current = weeks.at(-1) || null;
   const previous = weeks.at(-2) || null;
-  const delta = current && previous ? current.avgHoursPerSpacePerDay - previous.avgHoursPerSpacePerDay : 0;
-  const pct = previous?.avgHoursPerSpacePerDay ? delta / previous.avgHoursPerSpacePerDay : null;
+  const delta = current && previous ? current.averageDailyThreshold - previous.averageDailyThreshold : 0;
+  const pct = previous?.averageDailyThreshold ? delta / previous.averageDailyThreshold : null;
   return { current, previous, delta, pct };
 }
 
@@ -827,7 +1071,7 @@ function emptyWeekdayChart(day) {
   };
 }
 
-function usageForSpacesOnDate(spaces, date, bySpaceDate) {
+function usageForSpacesOnDate(spaces, date, bySpaceDate, day = dayIndex(date)) {
   const thresholdMinutes = state.filters.thresholdHours * 60;
   const minutesBySpace = spaces.map((space) => bySpaceDate.get(`${space.spaceId}|${date}`) || 0);
   const usedCount = minutesBySpace.filter((minutes) => minutes > 0).length;
@@ -835,7 +1079,7 @@ function usageForSpacesOnDate(spaces, date, bySpaceDate) {
   const totalMinutes = minutesBySpace.reduce((total, minutes) => total + minutes, 0);
   return {
     date,
-    day: dayIndex(date),
+    day,
     usedCount,
     thresholdCount,
     totalHours: totalMinutes / 60
@@ -926,7 +1170,6 @@ function dailyRows(spaces, usage) {
   return groups
     .flatMap((group) =>
       selectedDateEntries().map(({ date, day }) => {
-        const summary = computeSummaryForDate(group.spaces, date);
         const dailyUsage = usageForSpacesOnDate(group.spaces, date, usage.bySpaceDate);
         return {
           date,
@@ -937,8 +1180,7 @@ function dailyRows(spaces, usage) {
           spaceCount: group.spaces.length,
           usedSpaces: dailyUsage.usedCount,
           thresholdSpaces: dailyUsage.thresholdCount,
-          avgHoursPerUsedSpace: dailyUsage.usedCount ? dailyUsage.totalHours / dailyUsage.usedCount : 0,
-          ...summary
+          avgHoursPerSelectedSpace: group.spaces.length ? dailyUsage.totalHours / group.spaces.length : 0
         };
       })
     )
@@ -950,23 +1192,6 @@ function dailyRows(spaces, usage) {
         compareFloorName(a.floorName, b.floorName) ||
         a.typeLabel.localeCompare(b.typeLabel)
     );
-}
-
-function computeSummaryForDate(spaces, date) {
-  const previousStart = state.filters.startDate;
-  const previousEnd = state.filters.endDate;
-  state.filters.startDate = date;
-  state.filters.endDate = date;
-  const summary = computeSummary(spaces);
-  state.filters.startDate = previousStart;
-  state.filters.endDate = previousEnd;
-  return {
-    peakShare: spaces.length ? summary.peak.active / spaces.length : 0,
-    peakActive: summary.peak.active,
-    averageActive: summary.averageActive,
-    peakHour: summary.peak.hour,
-    peakMinute: summary.peak.minute
-  };
 }
 
 function groupedSpacesForDaily(spaces) {
@@ -983,6 +1208,59 @@ function groupedSpacesForDaily(spaces) {
       spaces: groupSpaces
     };
   });
+}
+
+function comparisonGroups(spaces) {
+  const selectedBuildingCount = state.filters.buildingIds.has("all") ? eligibleBuildings().length : state.filters.buildingIds.size;
+  const selectedFloorCount = state.filters.floorIds.has("all") ? eligibleFloors().filter((floor) => matchesSelectedBuildings(floor.buildingId)).length : state.filters.floorIds.size;
+  let keyFn;
+  let labelFn;
+
+  if (selectedBuildingCount !== 1) {
+    keyFn = (space) => space.buildingId;
+    labelFn = (groupSpaces) => shortBuildingName(groupSpaces[0].buildingName);
+  } else if (selectedFloorCount !== 1 && state.filters.type === "all") {
+    keyFn = (space) => space.floorId;
+    labelFn = (groupSpaces) => groupSpaces[0].floorName;
+  } else {
+    keyFn = (space) => space.type;
+    labelFn = (groupSpaces) => groupSpaces[0].type;
+  }
+
+  return [...groupBy(spaces, keyFn)].map(([, groupSpaces]) => ({
+    label: labelFn(groupSpaces),
+    spaces: groupSpaces
+  }));
+}
+
+function buildingInsightLines(spaces, usage, thresholdLabel) {
+  const groups = [...groupBy(spaces, (space) => space.buildingId)]
+    .map(([, groupSpaces]) => {
+      const rows = selectedDateEntries().map(({ date, day }) =>
+        usageForSpacesOnDate(groupSpaces, date, usage.bySpaceDate, day)
+      );
+      const averageDailyThreshold = rows.length ? sum(rows, "thresholdCount") / rows.length : 0;
+      return {
+        label: shortBuildingName(groupSpaces[0].buildingName),
+        spaceCount: groupSpaces.length,
+        averageDailyThreshold
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+
+  if (groups.length <= 1) return [];
+  return groups.map(
+    (group) =>
+      `<strong>${escapeHtml(group.label)}</strong>: ${number(group.averageDailyThreshold, 0)} of ${group.spaceCount} selected non-bookable spaces met ${escapeHtml(thresholdLabel)} per day.`
+  );
+}
+
+function comparisonModeLabel() {
+  const selectedBuildingCount = state.filters.buildingIds.has("all") ? eligibleBuildings().length : state.filters.buildingIds.size;
+  const selectedFloorCount = state.filters.floorIds.has("all") ? eligibleFloors().filter((floor) => matchesSelectedBuildings(floor.buildingId)).length : state.filters.floorIds.size;
+  if (selectedBuildingCount !== 1) return "Building";
+  if (selectedFloorCount !== 1 && state.filters.type === "all") return "Floor";
+  return "Space type";
 }
 
 function groupedSpacesForHourly(spaces) {
@@ -1045,6 +1323,11 @@ function averageSubjectLabel() {
   return singularTypeLabel(state.filters.type).toLowerCase();
 }
 
+function subjectPluralLabel() {
+  if (state.filters.type === "all") return "non-bookable spaces";
+  return selectedTypeLabel().toLowerCase();
+}
+
 function singularTypeLabel(type) {
   return String(type || "space")
     .replace(/ies$/i, "y")
@@ -1060,15 +1343,47 @@ function thresholdLabelText() {
   return `${number(hours, hours % 1 ? 1 : 0)} ${hours === 1 ? "hr" : "hrs"}+`;
 }
 
-function weekOverWeekSentence(weekOverWeek) {
+function dailyWeekOverWeekSentence(weekOverWeek) {
   const { current, previous, delta, pct } = weekOverWeek;
   if (!current || !previous) return "There is not enough selected history for a week-over-week comparison.";
-  const direction = delta > 0.005 ? "up" : delta < -0.005 ? "down" : "flat";
+  const direction = delta > 0.5 ? "up" : delta < -0.5 ? "down" : "flat";
   if (direction === "flat") {
-    return `Week over week usage was flat at ${number(current.avgHoursPerSpacePerDay, 2)} hours.`;
+    return `Week over week threshold use was flat at ${number(current.averageDailyThreshold, 0)} spaces per day.`;
   }
-  const pctText = pct == null ? `${number(Math.abs(delta), 1)} hours` : `${number(Math.abs(pct) * 100, 0)}%`;
-  return `Week over week usage was ${direction} ${pctText}, from ${number(previous.avgHoursPerSpacePerDay, 2)} hours to ${number(current.avgHoursPerSpacePerDay, 2)} hours.`;
+  const pctText = pct == null ? `${number(Math.abs(delta), 1)} spaces` : `${number(Math.abs(pct) * 100, 0)}%`;
+  return `Week over week threshold use was ${direction} ${pctText}, from ${number(previous.averageDailyThreshold, 0)} to ${number(current.averageDailyThreshold, 0)} spaces per day.`;
+}
+
+function compactDailyWeekOverWeek(weekOverWeek) {
+  const { previous, delta, pct } = weekOverWeek;
+  if (!previous) return "-";
+  if (Math.abs(delta) < 0.5) return "No change";
+  const sign = delta > 0 ? "+" : "";
+  const pctText = pct == null ? "" : ` (${sign}${number(pct * 100, 0)}%)`;
+  return `${sign}${number(delta, 0)} spaces${pctText}`;
+}
+
+function formatDailyWeekOverWeekValue(weekOverWeek) {
+  const { previous, delta, pct } = weekOverWeek;
+  if (!previous) return "-";
+  if (Math.abs(delta) < 0.5) return "Flat";
+  const sign = delta > 0 ? "+" : "";
+  return pct == null ? `${sign}${number(delta, 0)}` : `${sign}${number(pct * 100, 0)}%`;
+}
+
+function formatDailyWeekOverWeekSubtext(weekOverWeek) {
+  const { current, previous } = weekOverWeek;
+  if (!current || !previous) return "not enough prior-week data";
+  return `${number(previous.averageDailyThreshold, 0)} to ${number(current.averageDailyThreshold, 0)} spaces/day`;
+}
+
+function busiestHour(summary) {
+  let best = null;
+  for (const [key, value] of summary.averageActiveByDayHour) {
+    const [day, hour] = key.split("|").map(Number);
+    if (!best || value > best.value) best = { day, hour, value };
+  }
+  return best;
 }
 
 function formatWeekdayHourChange(current, previous) {
@@ -1095,8 +1410,32 @@ function selectedFloorLabel() {
   return `${selected.length} floors`;
 }
 
+function floorPillLabel(floor) {
+  const building = shortBuildingName(floor.buildingName);
+  const floorName = String(floor.floorName || "");
+  const floorMatch = floorName.match(/floor\s*0*(\d+[a-z]?)/i);
+  if (floorMatch) return `${building} Fl ${floorMatch[1].toUpperCase()}`;
+
+  const suffix = floorName
+    .replace(new RegExp(`\\s*:?\\s*${escapeRegExp(building)}\\s*$`, "i"), "")
+    .trim();
+  return suffix ? `${building} ${suffix}` : building;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function availableDates() {
   return state.data.dimensions?.dates || state.data.metrics?.concurrency?.dates || [];
+}
+
+function clampDateToAvailableRange(value) {
+  const dates = availableDates();
+  if (!dates.length) return value;
+  if (!value || value < dates[0]) return dates[0];
+  if (value > dates.at(-1)) return dates.at(-1);
+  return value;
 }
 
 function selectedHours() {

@@ -7,6 +7,7 @@
     "build:api": "node scripts/build-from-api.mjs && node scripts/add-concurrency.mjs",
     "build:catalog": "node scripts/build-from-api.mjs",
     "build:concurrency": "node scripts/add-concurrency.mjs",
+    "split:data": "node scripts/split-dashboard-data.mjs",
     "prepare:raw-window": "node scripts/prepare-raw-session-window.mjs",
     "filter:nonbookable": "node scripts/filter-nonbookable-catalog.mjs",
     "check:atlas-csv": "node scripts/check-atlas-csv.mjs",
