@@ -5,7 +5,7 @@ const tokenPath = process.env.DENSITY_API_TOKEN_FILE || "env/density-api-token.t
 const outputPath = process.argv[2] || path.join("data", "dashboard-data.json");
 const apiBase = process.env.DENSITY_API_BASE || "https://api.density.io";
 const targetBuildingCodes = new Set(
-  (process.env.AMAZON_NONBOOKABLE_BUILDINGS || "SEA25,SEA37,SEA44,SJC31,JFK27")
+  (process.env.AMAZON_NONBOOKABLE_BUILDINGS || "SEA25,SEA37,SEA44,SJC31,JFK27,WAS17")
     .split(",")
     .map((code) => code.trim().toUpperCase())
     .filter(Boolean)

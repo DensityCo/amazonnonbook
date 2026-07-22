@@ -31,7 +31,7 @@ npm run split:data
 The build flow:
 
 - Reads `/v3/spaces`.
-- Scopes to `SEA25`, `SEA37`, `SEA44`, `SJC31`, and `JFK27` by default. Override with `AMAZON_NONBOOKABLE_BUILDINGS=SEA25,JFK27 npm run build:api`.
+- Scopes to `SEA25`, `SEA37`, `SEA44`, `SJC31`, `JFK27`, and `WAS17` by default. Override with `AMAZON_NONBOOKABLE_BUILDINGS=SEA25,JFK27 npm run build:api`.
 - Keeps spaces with a `Non Bookable` or `Non-Bookable` label.
 - Uses the companion label as the space type filter where possible.
 - Keeps only spaces with presence-health status `healthy`, `degraded`, or `offline`.
